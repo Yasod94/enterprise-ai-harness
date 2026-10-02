@@ -1,0 +1,20 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Tests (CLI and hook)
+        run: uv run --extra test pytest -q
+      - name: Hook script syntax
+        run: node --check src/change_harness/data/hooks/harness-hook.cjs

@@ -1,0 +1,92 @@
+# Rendered by change-harness. Keeps the harness files in this repo up to date.
+#
+# - On a PR that changes .harness/**: renders the change, commits it to the PR
+#   branch, and runs `harness doctor` as a check.
+# - On `repository_dispatch` (sent by the harness repo on release) or a manual run:
+#   upgrades to the given version and opens a PR.
+#
+# If the change-harness repo is private, add a secret CHANGE_HARNESS_TOKEN with
+# read access to it.
+name: change-harness
+
+on:
+  pull_request:
+    paths:
+      - ".harness/**"
+      - ".github/agents/**"
+      - ".github/skills/**"
+      - ".github/hooks/harness/**"
+      - ".vscode/mcp.json"
+  repository_dispatch:
+    types: [change-harness-release]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Harness version to upgrade to (e.g. 0.2.0)"
+        required: true
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  render:
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+      - uses: astral-sh/setup-uv@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Resolve harness source
+        env:
+          TOKEN: ${{ secrets.CHANGE_HARNESS_TOKEN }}
+        run: |
+          SRC=$(jq -r .source .harness/lock.json)
+          VER=$(jq -r .harness_version .harness/lock.json)
+          if [ -n "$TOKEN" ]; then SRC=${SRC/https:\/\//https:\/\/x-access-token:$TOKEN@}; fi
+          echo "HARNESS=git+${SRC}@v${VER}" >> "$GITHUB_ENV"
+      - name: Render
+        run: uvx --from "$HARNESS" change-harness sync
+      - name: Commit rendered files
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            git config user.name "change-harness[bot]"
+            git config user.email "change-harness@users.noreply.github.com"
+            git add -A
+            git commit -m "Render change-harness files"
+            git push
+          fi
+      - name: Doctor
+        run: uvx --from "$HARNESS" change-harness doctor
+
+  upgrade:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Upgrade
+        env:
+          TOKEN: ${{ secrets.CHANGE_HARNESS_TOKEN }}
+          VERSION: ${{ github.event.inputs.version || github.event.client_payload.version }}
+        run: |
+          SRC=$(jq -r .source .harness/lock.json)
+          if [ -n "$TOKEN" ]; then SRC=${SRC/https:\/\//https:\/\/x-access-token:$TOKEN@}; fi
+          uvx --from "git+${SRC}@v${VERSION}" change-harness sync
+          uvx --from "git+${SRC}@v${VERSION}" change-harness doctor > doctor.txt || true
+      - uses: peter-evans/create-pull-request@v7
+        with:
+          branch: change-harness/upgrade
+          title: "Upgrade change-harness"
+          commit-message: "Upgrade change-harness"
+          body-path: doctor.txt
+          add-paths: |
+            .github
+            .harness
+            .vscode/mcp.json
+            AGENTS.md
+            .gitignore

@@ -1,0 +1,10 @@
+# Personal change-harness settings. Not committed. Only simple `key: value`
+# nesting is supported (no lists), because the hook reads this file directly.
+
+# review:
+#   implement: per-batch-3
+# budgets:
+#   impact:
+#     tool_calls: 120
+# hooks:
+#   audit: true
