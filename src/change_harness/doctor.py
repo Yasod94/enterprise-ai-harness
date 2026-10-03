@@ -46,6 +46,39 @@ def _frontmatter(text: str) -> dict:
         return {"__error__": True}
 
 
+def check_models(cfg: Config) -> list[Finding]:
+    """Model tiers: subagents must not sit above their caller's tier (VS Code refuses a
+    subagent on a model that costs more than the caller's), and handoff models need the
+    qualified "Name (vendor)" form."""
+    out: list[Finding] = []
+    if not cfg.tiers:
+        out.append(Finding("ok", "no model tiers set; every agent uses the model picked in the chat"))
+        return out
+    for tier in cfg.tier_order:
+        first = cfg.first_model(tier)
+        if first and not re.search(r"\([^)]+\)\s*$", first):
+            out.append(Finding("warn", f"models.tiers.{tier}: handoffs need a qualified name such as "
+                                       f"\"{first} (copilot)\""))
+    for agent_id, agent in cfg.agents.items():
+        caller = cfg.agent_tier(agent_id)
+        for sub in agent.get("subagents") or []:
+            if cfg.is_by_task(sub):
+                above = [t for t in cfg.tier_order if cfg.tier_rank(t) > cfg.tier_rank(caller)] if caller in cfg.tiers else []
+                if above:
+                    out.append(Finding("ok", f"{agent_id}: Task Runners on {', '.join(above)} run after the person presses "
+                                             f"\"Continue on the <tier> model\""))
+                continue
+            sub_tier = cfg.agent_tier(sub)
+            if sub_tier in cfg.tiers and caller in cfg.tiers and cfg.tier_rank(sub_tier) > cfg.tier_rank(caller):
+                out.append(Finding("error", f"{agent_id} ({caller}) calls {sub} ({sub_tier}); VS Code will not start a "
+                                            f"subagent above the caller's model cost. Lower {sub} or raise {agent_id}."))
+    checks = cfg.cross_checks()
+    if checks:
+        out.append(Finding("ok", "cross-checks: " + ", ".join(
+            f"{stage} on {spec['checker']} ({'required' if spec['required'] else 'offered'})" for stage, spec in checks.items())))
+    return out
+
+
 def check(root=None, live: bool = False) -> list[Finding]:
     out: list[Finding] = []
     try:
@@ -70,6 +103,8 @@ def check(root=None, live: bool = False) -> list[Finding]:
         for server in cfg.stage_servers_for(agent_id):
             if not cfg.servers[server].get("tools"):
                 out.append(Finding("warn", f"{agent_id}: server {server} adds all its tools; list `tools` to narrow it"))
+
+    out.extend(check_models(cfg))
 
     report = build(cfg, check=True)
     if report.changed:

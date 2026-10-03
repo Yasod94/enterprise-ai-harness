@@ -5,6 +5,7 @@ handoffs:
     agent: {{agent:planner}}
     prompt: "[harness:approve impact] Impact approved. Write the plan."
     send: true
+{{cross_check_handoffs}}
   - label: Revise
     agent: {{agent:impact-analyst}}
     prompt: "[harness:revise impact] "

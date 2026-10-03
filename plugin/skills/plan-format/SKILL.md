@@ -21,6 +21,7 @@ Input: `requirement.md`, `clarifications.md`, `impact.json`. Output: `plan.md` f
 - `Check` is a command that passes or fails, scoped to the task where possible.
 - `Cites` lists the clarification ids the task depends on, so the Task Runner reads only those.
 - Order by dependency. Schema and contract changes come before their producers and consumers.
+- `Tier` picks the model that implements the task. Use the tier table in the Planner's instructions; when unsure between two tiers, pick the higher one and say why in Steps. The person may change any Tier during review, and the approved plan fixes it.
 
 ## Coverage check before the review card
 

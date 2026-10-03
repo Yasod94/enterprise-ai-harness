@@ -32,6 +32,8 @@ On the first run in a clone, the orchestrator calls the Harness Check, which rep
 
 The hook adds `.changes/`, `.codegraph/` and `harness.local.yaml` to the clone's `.git/info/exclude`, so run files never show up in `git status`.
 
+Models need no setup. Each stage agent takes its model from the team's tiers. During plan review you can change any task's `Tier`; during implementation the Implementer asks you to press "Continue on the deep model" before a deep task. Type `models` to the orchestrator for a short explanation.
+
 ### Updates
 
 VS Code checks marketplace plugins for updates every 24 hours when `extensions.autoUpdate` is on. To update now, run `Extensions: Check for Extension Updates`.
@@ -97,6 +99,16 @@ Everything the plugin contains is built from `harness.yaml` and `sources/`. Pyth
 3. `uv run harness build`, then open a PR. CI runs the tests and `harness build --check`, which fails if `plugin/` does not match the sources.
 
 Do not edit files under `plugin/` by hand; the next build overwrites them.
+
+### Model tiers
+
+`models` in `harness.yaml` maps tiers to model lists and sets each agent's tier (see the README's Models section). Before the first release:
+
+1. Open the model picker in VS Code with your Copilot plan and check that each model name in `models.tiers` appears there. Write them qualified, as `Name (copilot)`; the first one in each list is also used on handoff buttons.
+2. Keep tiers cheapest first. `harness doctor` reports an agent whose subagent has a higher tier, because VS Code will not start it.
+3. Choose the cross-check policy per stage: `below` (default for plan), `always`, `offer` or `never`.
+
+When a model is retired, edit the tier list, bump `plugin.version` and rebuild; no agent text changes.
 
 ### Code graph settings
 

@@ -14,7 +14,8 @@ def test_plugin_layout(harness):
     p = harness / "plugin"
     manifest = json.loads((p / "plugin.json").read_text())
     assert manifest["$schema"].endswith("/1.0.0/plugin.schema.json") and manifest["name"] == "change-harness"
-    assert len(list((harness / AGENTS_DIR).glob("*.agent.md"))) == 10
+    # 9 single agents + 3 Task Runners (one per tier) + Plan and Impact Checkers
+    assert len(list((harness / AGENTS_DIR).glob("*.agent.md"))) == 14
     for skill in ("grill-me", "grilling", "change-artifacts", "impact-analysis", "plan-format", "tdd"):
         assert (p / "skills" / skill / "SKILL.md").exists()
     assert (p / "scripts/harness-hook.cjs").exists() and (p / "scripts/codegraph-index.cjs").exists()
@@ -46,7 +47,7 @@ def test_all_handoff_and_subagent_targets_exist(harness):
         assert all(h["agent"] in names for h in fm.get("handoffs", [])), p.name
         assert all(a in names for a in fm.get("agents", [])), p.name
         assert "agent" in fm["tools"] or not fm.get("agents"), p.name
-    assert frontmatter(harness / AGENTS_DIR / "task-runner.agent.md")["user-invocable"] is False
+    assert frontmatter(harness / AGENTS_DIR / "task-runner-fast.agent.md")["user-invocable"] is False
 
 
 def test_build_is_idempotent_and_check_detects_drift(harness):

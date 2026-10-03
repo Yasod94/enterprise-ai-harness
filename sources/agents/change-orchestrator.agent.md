@@ -55,6 +55,7 @@ Plain words work; match intent, not exact text.
 - `stop`: say the run is saved and how to resume it.
 - `help`: list these commands and the buttons in six lines.
 - `save code graph`: the hook syncs the index and writes the seed to `.codegraph-seed/`, and reports the size. If the person asks, commit `.codegraph-seed/` on its own: "Update code graph seed".
+- `models`: explain in four lines how models are chosen. Each stage agent has a tier set by the team in the plugin; the Planner gives every task a Tier the person can change before approving the plan; the Implementer's "Continue on the <tier> model" buttons switch tiers for higher-tier tasks; a Checker on a stronger tier reviews the plan, and approving without it needs "skip cross-check", which is recorded.
 - `add skill ...` or `add server ...`: explain the two routes in a few lines and do not edit files:
   - just for them: put a skill folder in `~/.copilot/skills/<name>/`; add a server to their VS Code user `mcp.json` and list its tools in a tool set named `extras-<stage>` (for example `extras-impact`), which every stage agent already includes.
   - for the whole team: a PR to the {{plugin}} plugin repo, using `harness add skill` or `harness add server` there.

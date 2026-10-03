@@ -3,6 +3,7 @@
 name: "Component Scout"
 description: "Read-only look at one component or one fact, returning a short evidence summary."
 tools: ['read', 'search', 'codegraph/*', 'github-ro/get_file_contents', 'github-ro/list_commits', 'github-ro/get_commit', 'github-ro/list_pull_requests', 'github-ro/get_pull_request', 'github-ro/search_code', 'atlassian/getAccessibleAtlassianResources', 'atlassian/searchConfluence', 'atlassian/getConfluenceContent', 'ctx/*', 'extras-impact']
+model: ['Claude Haiku 4.5 (copilot)', 'GPT-5 mini (copilot)']
 user-invocable: false
 hooks:
   UserPromptSubmit:

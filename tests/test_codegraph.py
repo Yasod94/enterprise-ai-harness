@@ -161,7 +161,7 @@ def approve_all_but_verify(harness, service, run):
                          ("implement", ["progress.md"])):
         for name in files:
             (run / name).write_text("{}" if name.endswith(".json") else "content\n")
-        code, _, err = run_hook(harness, service, "prompt", stage, {"prompt": f"[harness:approve {stage}]"})
+        code, _, err = run_hook(harness, service, "prompt", stage, {"prompt": f"[harness:approve {stage}] skip cross-check"})
         assert code == 0, err
     (run / "verification.md").write_text("content\n")
 

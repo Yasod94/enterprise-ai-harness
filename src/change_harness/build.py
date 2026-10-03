@@ -18,7 +18,7 @@ import stat
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from change_harness.config import Config
+from change_harness.config import CHECKER_AGENT, Config
 
 PLUGIN_DIR = "plugin"
 AGENTS_DIR = f"{PLUGIN_DIR}/com.github.copilot/agents"
@@ -48,24 +48,83 @@ def yaml_list(items: list[str]) -> str:
 
 # ---------- agents ----------
 
+@dataclass
+class Variant:
+    """One rendered agent file. Most agents have one; a by-task Task Runner has one per
+    tier, and the Checker has one per cross-checked stage."""
+    agent_id: str
+    file_id: str
+    name: str
+    tier: str | None = None
+    stage: str | None = None
+
+
+CHECKLISTS = {
+    "plan": [
+        "Every component in `impact.json` has a task, or a line under Out of scope saying why not.",
+        "Every acceptance criterion in `requirement.md` maps to a task's Check or to the Test plan.",
+        "Every decision in `clarifications.md` that affects code is reflected, and no task contradicts one.",
+        "Each task's Files list covers its Steps, and its Check would fail without the change.",
+        "Task order respects dependencies: schema and contract changes before their producers and consumers.",
+        "Each task's Tier fits the tier table below; flag a task that looks harder than its Tier.",
+        "Rollout and rollback work for this change; Risks name every new dependency, migration and contract change.",
+        "Nothing in the plan goes beyond the requirement.",
+    ],
+    "impact": [
+        "Every entity and behavior in `requirement.md` and `clarifications.md` was traced.",
+        "Consumers of each changed event, topic, table and API are listed, or ruled out with evidence.",
+        "Each confidence level matches its evidence; low-confidence items appear as questions.",
+        "`impact.json` and `impact.md` agree.",
+    ],
+}
+
+
 def agent_name(cfg: Config, agent_id: str) -> str:
     return cfg.agents[agent_id].get("name", agent_id)
 
 
-def render_frontmatter(cfg: Config, agent_id: str) -> str:
-    agent = cfg.agents[agent_id]
+def variants(cfg: Config, agent_id: str) -> list[Variant]:
+    base = agent_name(cfg, agent_id)
+    if agent_id == CHECKER_AGENT:
+        return [Variant(agent_id, f"{stage}-checker", f"{stage.capitalize()} {base}", spec["checker"], stage)
+                for stage, spec in cfg.cross_checks().items()]
+    if cfg.is_by_task(agent_id):
+        return [Variant(agent_id, f"{agent_id}-{tier}", f"{base} ({tier})", tier) for tier in cfg.tier_order]
+    return [Variant(agent_id, agent_id, base, cfg.agent_tier(agent_id) if cfg.agent_tier(agent_id) in cfg.tiers else None)]
+
+
+def all_variants(cfg: Config) -> list[Variant]:
+    return [v for agent_id in cfg.agents for v in variants(cfg, agent_id)]
+
+
+def subagent_names(cfg: Config, agent_id: str) -> list[str]:
+    return [v.name for v in variants(cfg, agent_id)]
+
+
+def stage_agent(cfg: Config, stage: str) -> str:
+    return next(s["agent"] for s in cfg.stages if s["id"] == stage)
+
+
+def next_stage(cfg: Config, stage: str) -> str | None:
+    ids = cfg.stage_ids
+    i = ids.index(stage)
+    return ids[i + 1] if i + 1 < len(ids) else None
+
+
+def render_frontmatter(cfg: Config, v: Variant) -> str:
+    agent = cfg.agents[v.agent_id]
     lines = [
-        f"# Built by change-harness from sources/agents/{agent_id}.agent.md. Do not edit here.",
-        f"name: {q(agent_name(cfg, agent_id))}",
+        f"# Built by change-harness from sources/agents/{v.agent_id}.agent.md. Do not edit here.",
+        f"name: {q(v.name)}",
         f"description: {q(agent.get('description', ''))}",
-        f"tools: {yaml_list(cfg.tools_for(agent_id))}",
+        f"tools: {yaml_list(cfg.tools_for(v.agent_id))}",
     ]
     subagents = agent.get("subagents") or []
     if subagents:
-        lines.append(f"agents: {yaml_list([agent_name(cfg, s) for s in subagents])}")
-    models = (cfg.raw.get("models") or {}).get(agent_id)
+        lines.append(f"agents: {yaml_list([n for s in subagents for n in subagent_names(cfg, s)])}")
+    models = cfg.agent_models(v.agent_id, v.tier)
     if models:
-        lines.append(f"model: {yaml_list(models if isinstance(models, list) else [models])}")
+        lines.append(f"model: {yaml_list(models)}")
     if agent.get("user_invocable") is False:
         lines.append("user-invocable: false")
     lines.append("hooks:")
@@ -76,6 +135,80 @@ def render_frontmatter(cfg: Config, agent_id: str) -> str:
             f"      command: {q(f'{HOOK_CMD} {mode} {agent['scope']}')}",
             f"      timeout: {timeout}",
         ]
+    return "\n".join(lines)
+
+
+def handoff(label: str, agent: str, prompt: str, send: bool, model: str | None = None) -> str:
+    lines = [f"  - label: {q(label)}", f"    agent: {q(agent)}", f"    prompt: {q(prompt)}",
+             f"    send: {'true' if send else 'false'}"]
+    if model:
+        lines.append(f"    model: {q(model)}")
+    return "\n".join(lines)
+
+
+def render_cross_check_handoffs(cfg: Config, agent_id: str) -> str:
+    stage = cfg.stage_of_scope(cfg.agents[agent_id].get("scope", ""))
+    spec = cfg.cross_checks().get(stage or "")
+    if not spec:
+        return ""
+    checker = next(v for v in variants(cfg, CHECKER_AGENT) if v.stage == stage)
+    files = ", ".join(next(s for s in cfg.stages if s["id"] == stage).get("artifacts", []))
+    out = [handoff(f"Cross-check with the {spec['checker']} model", checker.name,
+                   f"[harness:cross-check {stage}] Check {files} before the person approves it.",
+                   True, cfg.first_model(spec["checker"]))]
+    nxt = next_stage(cfg, stage)
+    if spec["required"]:
+        target = agent_name(cfg, stage_agent(cfg, nxt)) if nxt else agent_name(cfg, "change-orchestrator")
+        out.append(handoff(f"Approve without cross-check", target,
+                           f"[harness:approve {stage}] skip cross-check. Approved; continue with the {nxt or 'next'} stage.",
+                           True))
+    return "\n".join(out)
+
+
+def render_tier_handoffs(cfg: Config, agent_id: str) -> str:
+    runners = [s for s in cfg.agents[agent_id].get("subagents") or [] if cfg.is_by_task(s)]
+    if not runners:
+        return ""
+    return "\n".join(
+        handoff(f"Continue on the {tier} model", agent_name(cfg, agent_id),
+                f"[harness:tier {tier}] Continue with the next task.", True, cfg.first_model(tier))
+        for tier in cfg.tier_order)
+
+
+def render_task_tiers(cfg: Config, intro: bool = True) -> str:
+    if not cfg.tiers:
+        return ""
+    rows = ["Give every task a `Tier`. The person can change any Tier before approving the plan, and the "
+            "Implementer runs each task on its Tier's model.", ""] if intro else []
+    rows += ["| Tier | Models | Use for |", "| --- | --- | --- |"]
+    for tier, spec in cfg.tiers.items():
+        rows.append(f"| {tier} | {', '.join(spec['models'])} | {spec['use_for']} |")
+    rows += ["", f"When nothing in the table decides it, the tier is {cfg.task_default}."]
+    return "\n".join(rows)
+
+
+def task_runner_of(cfg: Config, agent_id: str) -> str | None:
+    return next((s for s in cfg.agents[agent_id].get("subagents") or [] if cfg.is_by_task(s)), None)
+
+
+def render_task_runner_dispatch(cfg: Config, agent_id: str) -> str:
+    if not task_runner_of(cfg, agent_id):
+        return "Run the Task Runner subagent"
+    return "Run the Task Runner for the task's `Tier` (see Task tiers below), starting its prompt with the task id,"
+
+
+def render_task_tier_rules(cfg: Config, agent_id: str) -> str:
+    runner = task_runner_of(cfg, agent_id)
+    if not runner:
+        return ""
+    lines = ["## Task tiers", "", "Each task in the approved `plan.md` has a `Tier`. Run the matching Task Runner:", ""]
+    lines += [f"- {v.tier}: {q(v.name)}" for v in variants(cfg, runner)]
+    lines += ["",
+              "VS Code does not start a subagent on a model that costs more than this session's model. The hook's "
+              "status line gives this session's tier. When the next task's Tier is above it, stop and show the card "
+              "with the Question line \"T<n> needs the <tier> model\"; the person presses \"Continue on the <tier> "
+              "model\". Lower tiers run from any session. The hook refuses a Task Runner whose tier differs from the "
+              "task's Tier in the approved plan."]
     return "\n".join(lines)
 
 
@@ -119,13 +252,47 @@ def render_skill_refs(cfg: Config, agent_id: str) -> str:
     return "\n".join(lines)
 
 
-def render_agent(cfg: Config, agent_id: str) -> str:
+def render_check_placeholders(cfg: Config, v: Variant, text: str) -> str:
+    stage = v.stage
+    if not stage:
+        return text
+    idx = cfg.stage_ids.index(stage)
+    arts = next(s for s in cfg.stages if s["id"] == stage).get("artifacts", [])
+    inputs = [a for s in cfg.stages[:idx] for a in s.get("artifacts", [])]
+    nxt = next_stage(cfg, stage)
+    checklist = CHECKLISTS.get(stage, ["The artifact follows its stage's skill and template, and is consistent with the earlier artifacts."])
+    extra = "\n\n   Tier table:\n\n" + "\n".join("   " + l if l else "" for l in render_task_tiers(cfg, intro=False).split("\n")) if stage == "plan" and cfg.tiers else ""
+    subs = {
+        "stage": stage,
+        "Stage": stage.capitalize(),
+        "artifacts": ", ".join(f"`{a}`" for a in arts),
+        "inputs": ", ".join(f"`{a}`" for a in inputs) or "requirement",
+        "stage_agent": q(agent_name(cfg, stage_agent(cfg, stage))),
+        "next_agent": q(agent_name(cfg, stage_agent(cfg, nxt)) if nxt else agent_name(cfg, "change-orchestrator")),
+        "next_stage": nxt or "next",
+        "checklist": "\n".join(f"   - {c}" for c in checklist) + extra,
+    }
+    return re.sub(r"\{\{check:(\w+)\}\}", lambda m: subs.get(m.group(1), m.group(0)), text)
+
+
+def render_agent(cfg: Config, v: Variant) -> str:
+    agent_id = v.agent_id
     template = (cfg.sources / "agents" / f"{agent_id}.agent.md").read_text(encoding="utf-8")
-    text = template.replace("{{generated}}", render_frontmatter(cfg, agent_id))
+    text = template.replace("{{generated}}", render_frontmatter(cfg, v))
+    text = render_check_placeholders(cfg, v, text)
+    text = text.replace("{{cross_check_handoffs}}", render_cross_check_handoffs(cfg, agent_id))
+    text = text.replace("{{tier_handoffs}}", render_tier_handoffs(cfg, agent_id))
+    text = text.replace("{{task_tiers}}", render_task_tiers(cfg))
+    text = text.replace("{{task_runner_dispatch}}", render_task_runner_dispatch(cfg, agent_id))
+    text = text.replace("{{task_tier_rules}}", render_task_tier_rules(cfg, agent_id))
     text = re.sub(r"\{\{agent:([\w-]+)\}\}", lambda m: q(agent_name(cfg, m.group(1))), text)
     text = text.replace("{{skills}}", render_skill_refs(cfg, agent_id))
     text = text.replace("{{capabilities}}", render_capabilities(cfg, agent_id))
     text = text.replace("{{plugin}}", cfg.plugin_name)
+    head, sep, body = text.partition("\n---\n")
+    if sep:  # drop blank lines that empty handoff placeholders leave in the frontmatter
+        head = re.sub(r"\n[ \t]*(?=\n)", "", head)
+        text = head + sep + body
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.rstrip() + "\n"
 
@@ -158,6 +325,25 @@ def hook_config(cfg: Config) -> dict:
         "runs": cfg.raw.get("runs", {"commit": False}),
         "code_index": cfg.code_index,
         "allowed_paths": {"default": [".changes/"]},
+        "models": models_config(cfg),
+    }
+
+
+def models_config(cfg: Config) -> dict:
+    scope_tiers = {}
+    for agent_id, agent in cfg.agents.items():
+        tier = cfg.agent_tier(agent_id)
+        if tier in cfg.tiers:
+            scope_tiers.setdefault(agent["scope"], tier)
+    runners = {v.name: v.tier for v in all_variants(cfg) if v.tier and cfg.is_by_task(v.agent_id)}
+    return {
+        "order": cfg.tier_order,
+        "first_model": {t: cfg.first_model(t) for t in cfg.tier_order},
+        "scope_tiers": scope_tiers,
+        "task_runners": runners,
+        "task_default": cfg.task_default,
+        "cross_check": {stage: {"checker": spec["checker"], "required": spec["required"]}
+                        for stage, spec in cfg.cross_checks().items()},
     }
 
 
@@ -207,8 +393,8 @@ def as_json(data: dict) -> bytes:
 
 def desired(cfg: Config) -> dict[str, bytes]:
     files: dict[str, bytes] = {}
-    for agent_id in cfg.agents:
-        files[f"{AGENTS_DIR}/{agent_id}.agent.md"] = render_agent(cfg, agent_id).encode()
+    for v in all_variants(cfg):
+        files[f"{AGENTS_DIR}/{v.file_id}.agent.md"] = render_agent(cfg, v).encode()
     for name, sfiles in skill_files(cfg).items():
         for rel, data in sfiles.items():
             files[f"{SKILLS_DIR}/{name}/{rel}"] = data

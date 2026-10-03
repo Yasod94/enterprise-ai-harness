@@ -16,8 +16,8 @@ def run_hook(c, mode, scope, event=None, env=None):
     return _run_hook(c[0], c[1], mode, scope, event, env)
 
 
-def approve(c, stage, scope=None):
-    return run_hook(c, "prompt", scope or stage, {"prompt": f"[harness:approve {stage}] go"})
+def approve(c, stage, scope=None, extra=""):
+    return run_hook(c, "prompt", scope or stage, {"prompt": f"[harness:approve {stage}] {extra or 'go'}"})
 
 
 def edit(c, scope, path, tool="editFiles"):
@@ -42,7 +42,7 @@ def approve_through_plan(c, run, impact_files=("src/OrderPublisher.java",)):
         {"name": "orders", "change_type": "code", "confidence": "high", "files": list(impact_files), "evidence": []}]}))
     assert approve(c, "impact")[0] == 0
     write(run, "plan.md")
-    assert approve(c, "plan")[0] == 0
+    assert approve(c, "plan", extra="skip cross-check")[0] == 0
 
 
 def test_no_active_run_means_no_interference(ctx):

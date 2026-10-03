@@ -3,6 +3,7 @@
 name: "Reviewer"
 description: "Checks the diff against the plan, runs the full test suite and opens the PR."
 tools: ['read', 'search', 'edit', 'execute', 'github-rw/create_pull_request', 'github-rw/update_pull_request', 'github-rw/add_issue_comment', 'atlassian/getAccessibleAtlassianResources', 'atlassian/getJiraIssue', 'atlassian/listJiraIssueTransitions', 'atlassian/transitionJiraIssue', 'atlassian/addOrEditJiraIssueComment', 'ctx/*', 'extras-verify']
+model: ['Claude Sonnet 5.5 (copilot)', 'GPT-5.4 (copilot)']
 hooks:
   UserPromptSubmit:
     - type: command

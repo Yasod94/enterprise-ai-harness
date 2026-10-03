@@ -3,6 +3,7 @@
 name: "Intake"
 description: "Turns a Jira ticket or a plain request into requirement.md."
 tools: ['read', 'search', 'edit', 'atlassian/getAccessibleAtlassianResources', 'atlassian/getJiraIssue', 'atlassian/searchJiraIssuesUsingJql', 'atlassian/listJiraIssueRemoteIssueLinks', 'atlassian/searchConfluence', 'atlassian/getConfluenceContent', 'extras-intake']
+model: ['Claude Haiku 4.5 (copilot)', 'GPT-5 mini (copilot)']
 hooks:
   UserPromptSubmit:
     - type: command

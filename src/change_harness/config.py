@@ -13,6 +13,10 @@ import yaml
 CONFIG_FILE = "harness.yaml"
 PLACEHOLDER = re.compile(r"<[a-z0-9][a-z0-9 _.-]*>", re.IGNORECASE)
 
+BY_TASK = "by-task"
+CHECK_WHEN = ("below", "always", "offer", "never")
+CHECKER_AGENT = "cross-checker"
+
 BUILTIN_TOOL_ESTIMATE = {
     "read": 3, "search": 4, "edit": 3, "execute": 3, "agent": 1, "todos": 1, "web": 1, "browser": 6,
 }
@@ -92,6 +96,76 @@ class Config:
     @property
     def code_index(self) -> dict:
         return copy.deepcopy(self.capabilities.get("code.graph", {}).get("index", {}) or {})
+
+    # ---------- models ----------
+
+    @property
+    def models(self) -> dict:
+        return self.raw.get("models", {}) or {}
+
+    @property
+    def tiers(self) -> dict[str, dict]:
+        """Tier name -> {"models": [...], "use_for": str}, cheapest first (file order)."""
+        out: dict[str, dict] = {}
+        for name, spec in (self.models.get("tiers") or {}).items():
+            if isinstance(spec, dict):
+                models = spec.get("models") or []
+                out[name] = {"models": [models] if isinstance(models, str) else list(models),
+                             "use_for": spec.get("use_for", "")}
+            else:
+                out[name] = {"models": [spec] if isinstance(spec, str) else list(spec or []), "use_for": ""}
+        return out
+
+    @property
+    def tier_order(self) -> list[str]:
+        return list(self.tiers)
+
+    def tier_rank(self, tier: str | None) -> int:
+        return self.tier_order.index(tier) if tier in self.tier_order else -1
+
+    def first_model(self, tier: str) -> str | None:
+        models = self.tiers.get(tier, {}).get("models") or []
+        return models[0] if models else None
+
+    def agent_tier(self, agent_id: str) -> str | None:
+        """The agent's tier name, `by-task`, or None (explicit model list or the picker's model)."""
+        value = (self.models.get("agents") or {}).get(agent_id)
+        return value if isinstance(value, str) else None
+
+    def agent_models(self, agent_id: str, tier: str | None = None) -> list[str]:
+        if tier:
+            return list(self.tiers.get(tier, {}).get("models") or [])
+        value = (self.models.get("agents") or {}).get(agent_id)
+        if isinstance(value, list):
+            return list(value)
+        if isinstance(value, str) and value in self.tiers:
+            return list(self.tiers[value]["models"])
+        return []
+
+    def is_by_task(self, agent_id: str) -> bool:
+        return self.agent_tier(agent_id) == BY_TASK and bool(self.tiers)
+
+    @property
+    def task_default(self) -> str | None:
+        default = self.models.get("task_default")
+        return default if default in self.tiers else (self.tier_order[len(self.tier_order) // 2] if self.tiers else None)
+
+    def cross_checks(self) -> dict[str, dict]:
+        """Stage -> {"checker": tier, "when": ..., "required": bool} for stages with a Checker."""
+        out: dict[str, dict] = {}
+        if CHECKER_AGENT not in self.agents:
+            return out
+        for stage, spec in (self.models.get("cross_check") or {}).items():
+            spec = spec or {}
+            when = spec.get("when", "below")
+            checker = spec.get("checker")
+            if when == "never" or stage not in self.stage_ids or checker not in self.tiers:
+                continue
+            stage_agent = next(s["agent"] for s in self.stages if s["id"] == stage)
+            agent_rank = self.tier_rank(self.agent_tier(stage_agent))
+            required = when == "always" or (when == "below" and (agent_rank < 0 or agent_rank < self.tier_rank(checker)))
+            out[stage] = {"checker": checker, "when": when, "required": required}
+        return out
 
     def server_usable(self, name: str) -> bool:
         server = self.servers.get(name)
@@ -241,6 +315,29 @@ def validate(cfg: Config) -> list[str]:
         for stage in entry.get("stages", []) or []:
             if stage not in cfg.stage_ids:
                 errors.append(f"skill {entry.get('name')}: unknown stage {stage}")
+    tiers = cfg.tiers
+    for name, spec in tiers.items():
+        if not spec["models"]:
+            errors.append(f"models.tiers.{name}: list at least one model")
+    for agent_id, value in (cfg.models.get("agents") or {}).items():
+        if agent_id not in cfg.agents:
+            errors.append(f"models.agents: unknown agent {agent_id}")
+        elif isinstance(value, str) and value != BY_TASK and value not in tiers:
+            errors.append(f"models.agents.{agent_id}: unknown tier {value}")
+        elif value == BY_TASK and cfg.agents[agent_id].get("scope") != "implement-task":
+            errors.append(f"models.agents.{agent_id}: by-task is only for the Task Runner")
+    if cfg.models.get("task_default") and cfg.models["task_default"] not in tiers:
+        errors.append(f"models.task_default: unknown tier {cfg.models['task_default']}")
+    for stage, spec in (cfg.models.get("cross_check") or {}).items():
+        spec = spec or {}
+        if stage not in cfg.stage_ids:
+            errors.append(f"models.cross_check: unknown stage {stage}")
+        if spec.get("when", "below") not in CHECK_WHEN:
+            errors.append(f"models.cross_check.{stage}.when must be one of {', '.join(CHECK_WHEN)}")
+        if spec.get("when") != "never" and spec.get("checker") not in tiers:
+            errors.append(f"models.cross_check.{stage}: checker must be a tier name")
+        if spec.get("when") != "never" and CHECKER_AGENT not in cfg.agents:
+            errors.append(f"models.cross_check.{stage}: needs the {CHECKER_AGENT} agent")
     refresh = cfg.code_index.get("seed_refresh", "stale")
     if refresh not in ("stale", "every-pr", "manual"):
         errors.append("code.graph index.seed_refresh must be stale, every-pr or manual")

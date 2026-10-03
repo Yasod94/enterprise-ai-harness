@@ -10,7 +10,7 @@ version: 1
 
 plugin:
   name: change-harness
-  version: 0.2.0
+  version: 0.3.0
   description: Copilot change workflow with a review after every stage, approval-gated code edits and swappable MCP tools.
   repository: https://github.com/<org>/change-harness
   license: MIT
@@ -222,6 +222,14 @@ agents:
     capabilities: [code.graph, output.sandbox]
     user_invocable: false
     scope: implement-task
+  cross-checker:
+    # Rendered once per stage listed under models.cross_check, as "<Stage> Checker".
+    name: Checker
+    description: Reviews a stage's artifacts on a stronger model before the person approves them.
+    builtin: [read, search, edit]
+    capabilities: [code.graph, arch.graph, docs.search, repo.read]
+    skills: [change-artifacts]
+    scope: cross-check
   reviewer:
     name: Reviewer
     description: Checks the diff against the plan, runs the full test suite and opens the PR.
@@ -256,10 +264,52 @@ budgets:
   implement: { tool_calls: 300, output_kb: 600 }
   implement-task: { tool_calls: 30 }
   verify: { tool_calls: 40 }
+  cross-check: { tool_calls: 40 }
 
-# Optional model per agent, as a prioritized list of names from the VS Code model
-# picker, e.g. griller: ["<strongest model> (copilot)"]. Empty means the picker's model.
-models: {}
+# Models. Each tier is a prioritized list of model names from the VS Code model
+# picker, qualified as "Name (vendor)"; the first one available to the person is
+# used. List tiers cheapest first: VS Code will not start a subagent on a model
+# that costs more than the model of the agent that calls it, and the build checks
+# subagent tiers against that rule. Check the names against the models your
+# Copilot plan enables.
+models:
+  tiers:
+    fast:
+      models: ["Claude Haiku 4.5 (copilot)", "GPT-5 mini (copilot)"]
+      use_for: Mechanical changes such as config, renames, wiring, or a test that copies an existing pattern.
+    standard:
+      models: ["Claude Sonnet 5.5 (copilot)", "GPT-5.4 (copilot)"]
+      use_for: Ordinary feature logic inside one component, with its tests.
+    deep:
+      models: ["Claude Opus 5.5 (copilot)", "GPT-5.5 (copilot)"]
+      use_for: Concurrency, data migrations, cross-component contracts, security- or money-sensitive logic, and anything the plan marks high risk.
+  # Tier per agent. Leave an agent out to use whatever the person picked in the
+  # model picker. `by-task` (Task Runner only) builds one Task Runner per tier;
+  # the Planner gives every task a Tier and the person can change it before
+  # approving the plan.
+  agents:
+    change-orchestrator: fast
+    harness-check: fast
+    intake: fast
+    griller: deep
+    impact-analyst: deep
+    component-scout: fast
+    planner: standard
+    implementer: standard
+    task-runner: by-task
+    reviewer: standard
+  task_default: standard
+  # Cross-checks: a Checker agent on a stronger tier reviews a stage's artifacts
+  # before approval and writes <stage>-check.md. `when`:
+  #   below   required when the stage agent's tier is lower than `checker` (or unset)
+  #   always  required on every run
+  #   offer   a button on the review card, never required
+  #   never   no Checker for this stage
+  # A required check must run, or the person approves with "skip cross-check",
+  # which the hook records in the approval.
+  cross_check:
+    plan: { checker: deep, when: below }
+    impact: { checker: deep, when: offer }
 
 hooks:
   audit: false                 # log every tool name and argument keys to .changes/.audit.log

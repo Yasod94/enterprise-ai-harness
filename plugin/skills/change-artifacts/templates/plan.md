@@ -19,6 +19,7 @@
 ### T1. <title>
 
 - Component: <name>
+- Tier: <a tier name from the Planner's tier table, e.g. fast | standard | deep>
 - Files: <paths this task may touch>
 - Steps: <2-5 short steps>
 - Check: <the command or test that proves it, e.g. `./gradlew test --tests OrderPublisherTest`>

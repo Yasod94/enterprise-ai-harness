@@ -2,7 +2,7 @@
   "name": "change-harness",
   "metadata": {
     "description": "Copilot change workflow with a review after every stage, approval-gated code edits and swappable MCP tools.",
-    "version": "0.2.0"
+    "version": "0.3.0"
   },
   "owner": {
     "name": "change-harness"
@@ -12,7 +12,7 @@
       "name": "change-harness",
       "source": "plugin",
       "description": "Copilot change workflow with a review after every stage, approval-gated code edits and swappable MCP tools.",
-      "version": "0.2.0"
+      "version": "0.3.0"
     }
   ]
 }

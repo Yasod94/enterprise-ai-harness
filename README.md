@@ -15,8 +15,8 @@ Setup steps for developers and maintainers are in [SETUP.md](SETUP.md).
 | 1 Intake | Intake | `requirement.md` | the summary of the ticket or request |
 | 2 Grill | Griller (grill-me) | `clarifications.md` | the decisions, asked in rounds |
 | 3 Impact | Impact Analyst + Component Scout | `impact.md`, `impact.json` | which components change, with evidence |
-| 4 Plan | Planner | `plan.md` | per-component changes and tasks; approving unlocks code edits |
-| 5 Implement | Implementer + Task Runner | code, `progress.md` | each task's diff and check result |
+| 4 Plan | Planner, then Plan Checker on a stronger model | `plan.md`, `plan-check.md` | per-component changes, tasks and each task's model tier; approving unlocks code edits |
+| 5 Implement | Implementer + a Task Runner per tier | code, `progress.md` | each task's diff and check result |
 | 6 Verify | Reviewer | `verification.md`, the PR | plan coverage, full test run, review |
 
 Runs live in `.changes/<run-id>/` in the clone. The run id is the Jira key, or `local-<date>-<slug>` for a plain request.
@@ -33,9 +33,51 @@ Cost       18 of 80 tool calls
 [Approve and continue]  [Revise]  [Stop]
 ```
 
-You can also type `approve`, `revise: <note>`, `stop`, `extend` (adds 50% to the stage budget), or, to the orchestrator, `status`, `resume <run-id>`, `back to <stage>`, `save code graph`, `help`, `add skill ...`, `add server ...`.
+You can also type `approve`, `revise: <note>`, `stop`, `extend` (adds 50% to the stage budget), or, to the orchestrator, `status`, `resume <run-id>`, `back to <stage>`, `save code graph`, `models`, `help`, `add skill ...`, `add server ...`.
 
 You can edit any artifact before approving it. Approving records a hash of each artifact; if one changes afterwards, the next stage refuses to start until it is approved again.
+
+## Models
+
+Each stage agent runs on a model tier, and each plan task carries its own tier. The tiers live in `harness.yaml`:
+
+```yaml
+models:
+  tiers:                      # cheapest first; the first available model in a list is used
+    fast:     { models: ["Claude Haiku 4.5 (copilot)", "GPT-5 mini (copilot)"], use_for: "config, renames, wiring" }
+    standard: { models: ["Claude Sonnet 5.5 (copilot)", "GPT-5.4 (copilot)"], use_for: "feature logic in one component" }
+    deep:     { models: ["Claude Opus 5.5 (copilot)", "GPT-5.5 (copilot)"], use_for: "concurrency, migrations, contracts" }
+  agents:                     # leave an agent out to use the model picked in the chat
+    griller: deep
+    impact-analyst: deep
+    planner: standard
+    implementer: standard
+    task-runner: by-task      # one Task Runner per tier
+  task_default: standard
+  cross_check:
+    plan:   { checker: deep, when: below }   # required: the planner's tier is below deep
+    impact: { checker: deep, when: offer }   # a button, not required
+```
+
+Who decides what:
+
+| Decision | Made by | Where |
+| --- | --- | --- |
+| Which models each tier means, and each stage agent's tier | the team | `harness.yaml`, shipped in the plugin |
+| Each task's tier | the Planner proposes, the person changes it during plan review | `- Tier:` on each task in `plan.md`; approval locks it |
+| Running a higher-tier task | the person | "Continue on the deep model" button in the Implementer |
+| Skipping a required cross-check | the person | "Approve without cross-check", recorded in `approval.json` |
+
+How it works:
+
+- The build writes each agent's tier into its `model:` frontmatter and builds one Task Runner per tier ("Task Runner (fast)", ...). The Implementer runs each task with the Task Runner for its `Tier`.
+- VS Code does not start a subagent on a model that costs more than the calling session's model. A standard Implementer therefore cannot start the deep Task Runner directly. It stops before a deep task and shows "Continue on the deep model", a handoff that switches the session's model; after that, every tier up to deep can run. A new chat starts on the Implementer's own tier again.
+- The hook refuses a Task Runner whose tier differs from the task's `Tier` in the approved plan, or that sits above the session's tier, and its status line tells the agent which tier the session is on.
+- Cross-check: when the Planner's tier is below the checker's, the plan needs a review by the Plan Checker on the deep model before approval. The Planner's card has "Cross-check with the deep model". The Checker writes `plan-check.md`, a verdict and up to 10 findings, each with evidence. "Apply the findings" sends them back to the Planner, which fixes what it agrees with and lists what it did with each finding in `plan.md`. The hook blocks plan approval until the check has run, unless the person presses "Approve without cross-check". `approval.json` records the verdict and whether the plan changed after the check, or the skip.
+- `when: always` requires the check whatever the tiers; `offer` adds the button only; `never` removes the Checker.
+- `harness doctor` reports an error when an agent's subagent has a higher tier than the agent, since VS Code would refuse to start it.
+
+Model names must match what the VS Code model picker shows for your Copilot plan, qualified as `Name (vendor)`. Check them when your organization changes its enabled models.
 
 ## Code graph
 
@@ -63,7 +105,8 @@ The hook and the code graph server deny agent edits to `.codegraph/` and `.codeg
 ```text
 harness.yaml                   team configuration: servers, capabilities, stages, agents, budgets
 sources/
-  agents/*.agent.md            agent templates ({{generated}}, {{skills}}, {{capabilities}}, {{agent:id}}, {{plugin}})
+  agents/*.agent.md            agent templates ({{generated}}, {{skills}}, {{capabilities}}, {{agent:id}}, {{plugin}});
+                               task-runner is built once per tier, cross-checker once per checked stage
   skills/vendor/               vendored skills, pinned, with SOURCE.md and LICENSE
   skills/team/                 team-written skills and artifact templates
   scripts/harness-hook.cjs     approvals, edit guard, budgets, run-file excludes
@@ -121,6 +164,7 @@ hooks:
 - `servers`: MCP servers. HTTP servers sign in with OAuth in VS Code; stdio servers start on demand. `tools` narrows a server to named tools; `est_tools` feeds the tool-count check. A server with `enabled: false` or a `<placeholder>` value is left out, and its capabilities use their `alt` server or fallback.
 - `capabilities`: `bind`, `alt`, `tools` (narrowing per capability), `setup` (a one-time command the Harness Check runs), `index` (code graph seed settings), `fallback`.
 - `stages`, `agents`: stage order, artifacts, and each agent's built-in tool sets, capabilities, subagents and start-up skills.
+- `models`: tiers, each agent's tier, the default task tier, and cross-checks (see Models).
 - `review`, `budgets`, `models`, `hooks`, `skills`.
 
 Secrets never go in these files. Use OAuth servers, or `${input:<id>}` references that VS Code keeps in its secret storage. `harness doctor` flags anything that looks like a token.
@@ -133,7 +177,7 @@ Secrets never go in these files. Use OAuth servers, or `${input:<id>}` reference
 - `PreToolUse` limits edits: before plan approval, harness agents can only edit `.changes/`; after it, the Implementer and Task Runner can edit code, and the hook asks before edits to files not in `impact.json` (tests excepted). The Reviewer can only edit `.changes/`. It also enforces tool-call and output budgets per stage.
 - `PostToolUse` counts output size and starts the background code graph sync. `PreCompact` appends a status snapshot to `progress.md`.
 
-Agents cannot edit `state.json`, `approval.json`, `.usage.json`, `.codegraph/`, `.codegraph-seed/` or (except the orchestrator) `.changes/current`.
+Agents cannot edit `state.json`, `approval.json`, `.usage.json`, `.codegraph/`, `.codegraph-seed/` or (except the orchestrator) `.changes/current`. Only a Checker writes `<stage>-check.md`.
 
 This is a guardrail against mistakes, not a security boundary. Branch protection and PR review remain the real controls.
 
@@ -166,6 +210,7 @@ grill-me's own file points to grilling, so both are vendored. Each vendored skil
 - GitHub Enterprise Server needs the local GitHub MCP server instead of the hosted one. An Atlassian Data Center site needs a self-hosted Atlassian MCP server.
 - CodeGraph and context-mode run through npx and are not vendored; check their licenses and telemetry settings with your OSS review (`DO_NOT_TRACK=1` is set for CodeGraph).
 - Seed size and conflicts on your largest repo.
+- Models. That the handoff `model` field switches the session's model, that a plugin agent's `model` list applies when it runs as a subagent, and that each tier's models are allowed as subagents on your Copilot plan.
 
 ## Development
 

@@ -1,8 +1,9 @@
 ---
 # Built by change-harness from sources/agents/task-runner.agent.md. Do not edit here.
-name: "Task Runner"
+name: "Task Runner (deep)"
 description: "Implements exactly one plan task with the smallest change that passes its check."
 tools: ['read', 'search', 'edit', 'execute', 'codegraph/*', 'ctx/*', 'extras-implement']
+model: ['Claude Opus 5.5 (copilot)', 'GPT-5.5 (copilot)']
 user-invocable: false
 hooks:
   UserPromptSubmit:

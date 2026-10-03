@@ -1,6 +1,6 @@
 {
   "plugin": "change-harness",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "stages": [
     "intake",
     "grill",
@@ -62,6 +62,9 @@
     },
     "verify": {
       "tool_calls": 40
+    },
+    "cross-check": {
+      "tool_calls": 40
     }
   },
   "review": {
@@ -94,5 +97,44 @@
     "default": [
       ".changes/"
     ]
+  },
+  "models": {
+    "order": [
+      "fast",
+      "standard",
+      "deep"
+    ],
+    "first_model": {
+      "fast": "Claude Haiku 4.5 (copilot)",
+      "standard": "Claude Sonnet 5.5 (copilot)",
+      "deep": "Claude Opus 5.5 (copilot)"
+    },
+    "scope_tiers": {
+      "orchestrator": "fast",
+      "check": "fast",
+      "intake": "fast",
+      "grill": "deep",
+      "impact": "deep",
+      "scout": "fast",
+      "plan": "standard",
+      "implement": "standard",
+      "verify": "standard"
+    },
+    "task_runners": {
+      "Task Runner (fast)": "fast",
+      "Task Runner (standard)": "standard",
+      "Task Runner (deep)": "deep"
+    },
+    "task_default": "standard",
+    "cross_check": {
+      "plan": {
+        "checker": "deep",
+        "required": true
+      },
+      "impact": {
+        "checker": "deep",
+        "required": false
+      }
+    }
   }
 }

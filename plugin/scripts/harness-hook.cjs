@@ -19,7 +19,7 @@ const os = require('os');
 const codegraph = require('./codegraph-index.cjs');
 
 const HOOK_DIR = __dirname;
-const PRE_IMPLEMENT = new Set(['orchestrator', 'check', 'intake', 'grill', 'impact', 'plan', 'scout']);
+const PRE_IMPLEMENT = new Set(['orchestrator', 'check', 'intake', 'grill', 'impact', 'plan', 'scout', 'cross-check']);
 const IMPLEMENT = new Set(['implement', 'implement-task']);
 const PATH_KEYS = ['filePath', 'file_path', 'path', 'paths', 'files', 'uri', 'target_file', 'targetFile',
   'filename', 'oldPath', 'newPath', 'dirPath', 'directoryPath', 'explanationFilePath'];
@@ -96,6 +96,11 @@ function loadConfig(root) {
   cfg.allowed_paths = cfg.allowed_paths || {};
   cfg.runs = cfg.runs || {};
   cfg.code_index = cfg.code_index || {};
+  cfg.models = cfg.models || {};
+  cfg.models.order = cfg.models.order || [];
+  cfg.models.cross_check = cfg.models.cross_check || {};
+  cfg.models.task_runners = cfg.models.task_runners || {};
+  cfg.models.scope_tiers = cfg.models.scope_tiers || {};
   return cfg;
 }
 
@@ -246,13 +251,107 @@ function impactFiles(run) {
   return files;
 }
 
+// ---------- model tiers and cross-checks ----------
+
+function tierRank(cfg, tier) { return cfg.models.order.indexOf(tier); }
+
+function modelOf(cfg, tier) {
+  const m = (cfg.models.first_model || {})[tier];
+  return m ? ` (${m})` : '';
+}
+
+// The tier of this agent session: what the person chose with a "Continue on the
+// <tier> model" button in this session, else the agent's configured tier.
+function sessionTier(cfg, run, scope, event) {
+  const rec = (run.state.session_tiers || {})[scope];
+  if (rec && (!rec.session || !event.session_id || rec.session === event.session_id)) return rec.tier;
+  return cfg.models.scope_tiers[scope] || null;
+}
+
+// Tier per task from plan.md: "### T3. <title>" followed by "- Tier: deep".
+function planTaskTiers(run) {
+  const tiers = {};
+  let text;
+  try { text = fs.readFileSync(path.join(run.dir, 'plan.md'), 'utf8'); } catch { return tiers; }
+  let task = null;
+  for (const line of text.split(/\r?\n/)) {
+    const h = line.match(/^#{2,4}\s+(T\d+)\b/);
+    if (h) { task = h[1]; continue; }
+    if (/^#{1,4}\s/.test(line)) { task = null; continue; }
+    const t = task && line.match(/^\s*[-*]\s*Tier:\s*([\w-]+)/i);
+    if (t) tiers[task] = t[1].toLowerCase();
+  }
+  return tiers;
+}
+
+function checkFile(run, stage) { return path.join(run.dir, `${stage}-check.md`); }
+
+function checkVerdict(file) {
+  try {
+    const m = fs.readFileSync(file, 'utf8').match(/^\s*Verdict:\s*(.+?)\s*$/im);
+    return m ? m[1].toLowerCase() : 'no verdict line';
+  } catch { return null; }
+}
+
+function startCrossCheck(cfg, run, stage) {
+  if (!cfg.stages.includes(stage)) blockPrompt(`Unknown stage "${stage}". Stages are: ${cfg.stages.join(', ')}.`);
+  const files = {};
+  for (const { name, file } of artifactPaths(cfg, run, stage)) {
+    if (!fs.existsSync(file) || fs.statSync(file).size === 0) {
+      blockPrompt(`Nothing to cross-check yet: ${name} is missing or empty in .changes/${run.id}/.`);
+    }
+    files[name] = sha256(file);
+  }
+  const spec = cfg.models.cross_check[stage] || {};
+  run.state.cross_checks = run.state.cross_checks || {};
+  run.state.cross_checks[stage] = { at: new Date().toISOString(), checker: spec.checker || null, checked: files };
+  run.usage['cross-check'] = { tool_calls: 0, output_bytes: 0 };
+  saveState(run); saveUsage(run);
+  const names = Object.keys(files).join(', ');
+  return `Cross-check of ${stage} started on the ${spec.checker || 'chosen'} tier; ${names} hashed as checked. `
+    + `Write the findings to .changes/${run.id}/${stage}-check.md, starting with a "Verdict:" line.`;
+}
+
+// Returns the cross-check record for an approval, or blocks the approval when a
+// required check has not run and the person did not say "skip cross-check".
+function crossCheckRecord(cfg, run, stage, files, skip, by) {
+  const spec = cfg.models.cross_check[stage];
+  if (!spec) return null;
+  const rec = (run.state.cross_checks || {})[stage];
+  const file = checkFile(run, stage);
+  const done = rec && fs.existsSync(file) && fs.statSync(file).size > 0;
+  if (done) {
+    const changed = Object.entries(rec.checked || {}).some(([name, hash]) => files[name] !== hash);
+    return { checker: rec.checker, verdict: checkVerdict(file), checked_at: rec.at,
+      changed_after_check: changed, check_sha256: sha256(file) };
+  }
+  if (spec.required && !skip) {
+    blockPrompt(`The ${stage} needs a cross-check on the ${spec.checker} tier before approval. `
+      + `Press "Cross-check with the ${spec.checker} model", or approve with "skip cross-check" to record that you skipped it.`);
+  }
+  return skip ? { skipped: true, by, required: !!spec.required } : null;
+}
+
+function describeCheck(stage, cc) {
+  if (!cc) return '';
+  if (cc.skipped) return ` Cross-check of ${stage} skipped by ${cc.by}; recorded.`;
+  return ` Cross-check verdict: ${cc.verdict}${cc.changed_after_check ? `; ${stage} changed after the check` : ''}.`;
+}
+
 function statusLine(cfg, run, scope) {
   const key = scope || run.state.stage;
   const used = usageOf(run, key).tool_calls;
   const b = budgetFor(cfg, run, key);
   const review = cfg.review[stageOf(key)] || 'required';
-  return `Harness status: run ${run.id}, active stage ${run.state.stage}, this agent's scope ${key}, `
+  let line = `Harness status: run ${run.id}, active stage ${run.state.stage}, this agent's scope ${key}, `
     + `${used} of ${b.calls || 'unlimited'} tool calls used, review mode ${review}.`;
+  const tier = sessionTier(cfg, run, key, {});
+  if (tier) line += ` Model tier: ${tier}${modelOf(cfg, tier)}.`;
+  const spec = cfg.models.cross_check[key];
+  if (spec && spec.required && !(run.state.cross_checks || {})[key]) {
+    line += ` A cross-check on the ${spec.checker} tier is required before ${key} can be approved.`;
+  }
+  return line;
 }
 
 // ---------- prompt: approvals, revisions, stop, extend ----------
@@ -260,16 +359,19 @@ function statusLine(cfg, run, scope) {
 function parsePrompt(text, scope) {
   const t = text || '';
   let m;
-  if ((m = t.match(/\[harness:approve\s+([\w-]+)\]/i))) return { action: 'approve', stage: m[1].toLowerCase() };
+  const skip = /\bskip(ping)? (the )?cross-?check\b/i.test(t);
+  if ((m = t.match(/\[harness:cross-check\s+([\w-]+)\]/i))) return { action: 'cross-check', stage: m[1].toLowerCase() };
+  if ((m = t.match(/\[harness:tier\s+([\w-]+)\]/i))) return { action: 'tier', tier: m[1].toLowerCase() };
+  if ((m = t.match(/\[harness:approve\s+([\w-]+)\]/i))) return { action: 'approve', stage: m[1].toLowerCase(), skip };
   if ((m = t.match(/\[harness:revise\s+([\w-]+)\]/i))) return { action: 'revise', stage: m[1].toLowerCase() };
   if (/\[harness:stop\]/i.test(t)) return { action: 'stop' };
   if (/\[harness:extend\]/i.test(t) || /^\s*extend\b/i.test(t)) return { action: 'extend' };
   if (/\[harness:codegraph-save\]/i.test(t) || /^\s*(save|refresh) (the )?code ?graph\b/i.test(t)) return { action: 'codegraph-save' };
   if ((m = t.match(/^\s*back to\s+([\w-]+)/i))) return { action: 'revise', stage: m[1].toLowerCase() };
   const userStages = ['intake', 'grill', 'impact', 'plan', 'implement', 'verify'];
-  if (/^\s*approve\s*[.!]?\s*$/i.test(t)) {
+  if (/^\s*approve\s*[.!]?\s*$/i.test(t) || (skip && /^\s*approve\b/i.test(t))) {
     if (scope === 'implement') return { action: 'approve', stage: 'task' };
-    if (userStages.includes(scope)) return { action: 'approve', stage: scope };
+    if (userStages.includes(scope)) return { action: 'approve', stage: scope, skip };
   }
   if (/^\s*revise\b/i.test(t) && userStages.includes(scope)) return { action: 'revise', stage: scope };
   if (/^\s*stop\s*[.!]?\s*$/i.test(t)) return { action: 'stop' };
@@ -281,11 +383,13 @@ function clearLaterApprovals(cfg, run, stage, inclusive) {
   const impl = cfg.stages.indexOf('implement');
   cfg.stages.forEach((s, i) => {
     if (i > idx || (inclusive && i === idx)) delete run.state.approvals[s];
+    // A check of a later stage looked at artifacts built on what is being revised.
+    if (i > idx && run.state.cross_checks) delete run.state.cross_checks[s];
   });
   if (idx < impl || (inclusive && idx === impl)) delete run.state.approvals.tasks;
 }
 
-function approve(cfg, run, stage, root) {
+function approve(cfg, run, stage, root, skip) {
   const now = new Date().toISOString();
   if (stage === 'task') {
     run.state.approvals.tasks = (run.state.approvals.tasks || 0) + 1;
@@ -313,13 +417,16 @@ function approve(cfg, run, stage, root) {
     const impact = path.join(run.dir, 'impact.json');
     if (fs.existsSync(impact)) files['impact.json'] = sha256(impact);
   }
-  clearLaterApprovals(cfg, run, stage, false);
   const by = approverName(root);
+  const cc = crossCheckRecord(cfg, run, stage, files, skip, by);
+  clearLaterApprovals(cfg, run, stage, false);
   run.state.approvals[stage] = { at: now, by, files };
+  if (cc) run.state.approvals[stage].cross_check = cc;
   if (stage === 'plan') {
     writeJsonAtomic(path.join(run.dir, 'approval.json'), {
       run: run.id, approved_by: by, approved_at: now,
       plan_sha256: files['plan.md'], impact_sha256: files['impact.json'] || null,
+      cross_check: cc,
     });
   }
   const next = cfg.stages[idx + 1] || 'done';
@@ -327,7 +434,7 @@ function approve(cfg, run, stage, root) {
   run.state.stage_status = next === 'done' ? 'done' : 'working';
   if (next !== 'done') run.usage[next] = { tool_calls: 0, output_bytes: 0 };
   saveState(run); saveUsage(run);
-  return `Approved ${stage} by ${by}; artifact hashes recorded. Active stage is now ${next}.`;
+  return `Approved ${stage} by ${by}; artifact hashes recorded.${describeCheck(stage, cc)} Active stage is now ${next}.`;
 }
 
 function revise(cfg, run, stage) {
@@ -362,8 +469,16 @@ function onPrompt(cfg, root, scope, event) {
     return;
   }
   if (cmd) {
-    if (cmd.action === 'approve') {
-      notes.push(approve(cfg, run, cmd.stage, root));
+    if (cmd.action === 'cross-check') notes.push(startCrossCheck(cfg, run, cmd.stage));
+    else if (cmd.action === 'tier') {
+      if (!cfg.models.order.includes(cmd.tier)) blockPrompt(`Unknown model tier "${cmd.tier}". Tiers: ${cfg.models.order.join(', ') || 'none configured'}.`);
+      run.state.session_tiers = run.state.session_tiers || {};
+      run.state.session_tiers[scope] = { tier: cmd.tier, session: event.session_id || null, at: new Date().toISOString() };
+      saveState(run);
+      notes.push(`This ${scope} session now runs on the ${cmd.tier} tier${modelOf(cfg, cmd.tier)}. Task Runners up to ${cmd.tier} can run.`);
+    }
+    else if (cmd.action === 'approve') {
+      notes.push(approve(cfg, run, cmd.stage, root, cmd.skip));
       if (cmd.stage === 'verify' && codegraph.shouldRefresh(root, cfg.code_index)) {
         notes.push(codegraphSave(cfg, root, `pr ${run.id}`)
           + ' Commit .codegraph-seed/ with the PR as its own commit, "Refresh code graph seed".');
@@ -442,6 +557,9 @@ function onPreTool(cfg, root, scope, event) {
       if (p.startsWith(cgDir) || p.startsWith(seedDir)) {
         return decide('deny', `${p} is maintained by the harness hook and the code graph server. Say "save code graph" to refresh the seed.`);
       }
+      if (p.startsWith(runRel) && /^[\w-]+-check\.md$/.test(p.slice(runRel.length)) && scope !== 'cross-check') {
+        return decide('deny', `${p} is written by the Checker on the stronger model. Record what you did with its findings in the stage's own artifact.`);
+      }
       if (p === `${runRel}state.json` || p === `${runRel}approval.json` || p === `${runRel}.usage.json`) {
         if (!(p.endsWith('state.json') && scope === 'orchestrator' && !fs.existsSync(path.join(root, p)))) {
           return decide('deny', `${p} is owned by the harness hook. Approvals and stage changes come from the person's approve, revise and back-to commands.`);
@@ -475,8 +593,26 @@ function onPreTool(cfg, root, scope, event) {
     if (!pa.ok) return decide('deny', pa.reason);
   }
 
-  // A new Task Runner dispatch starts a fresh per-task budget.
-  if (isSubagent && scope === 'implement') run.usage['implement-task'] = { tool_calls: 0, output_bytes: 0 };
+  // Task Runner dispatch: the runner's tier must match the task's Tier in the approved
+  // plan, and must not be above this session's tier (VS Code would refuse it anyway).
+  if (isSubagent && scope === 'implement') {
+    const name = String(input.agentName || input.agent_name || input.agent || '');
+    const runnerTier = cfg.models.task_runners[name];
+    if (runnerTier) {
+      const task = (String(input.prompt || input.description || '').match(/\bT\d+\b/) || [])[0];
+      const planned = task ? planTaskTiers(run)[task] : null;
+      if (planned && planned !== runnerTier) {
+        const want = Object.keys(cfg.models.task_runners).find((n) => cfg.models.task_runners[n] === planned);
+        return decide('deny', `${task} has Tier ${planned} in the approved plan. Run ${want ? `"${want}"` : `the ${planned} Task Runner`} instead, or go back to plan to change the Tier.`);
+      }
+      const session = sessionTier(cfg, run, scope, event);
+      if (session && tierRank(cfg, runnerTier) > tierRank(cfg, session)) {
+        return decide('deny', `"${name}" runs on the ${runnerTier} tier and this session runs on ${session}. VS Code does not start a `
+          + `subagent above the session's model cost. Stop and show the card; the person can press "Continue on the ${runnerTier} model".`);
+      }
+    }
+    run.usage['implement-task'] = { tool_calls: 0, output_bytes: 0 };  // fresh per-task budget
+  }
 
   for (const key of keys) usageOf(run, key).tool_calls += 1;
   saveUsage(run);

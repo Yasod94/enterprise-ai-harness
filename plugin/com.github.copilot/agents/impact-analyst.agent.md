@@ -4,6 +4,7 @@ name: "Impact Analyst"
 description: "Finds the components a change touches, with evidence, and writes impact.md and impact.json."
 tools: ['read', 'search', 'edit', 'agent', 'codegraph/*', 'atlassian/getAccessibleAtlassianResources', 'atlassian/searchConfluence', 'atlassian/getConfluenceContent', 'ctx/*', 'extras-impact']
 agents: ['Component Scout']
+model: ['Claude Opus 5.5 (copilot)', 'GPT-5.5 (copilot)']
 hooks:
   UserPromptSubmit:
     - type: command
@@ -26,6 +27,11 @@ handoffs:
     agent: "Planner"
     prompt: "[harness:approve impact] Impact approved. Write the plan."
     send: true
+  - label: "Cross-check with the deep model"
+    agent: "Impact Checker"
+    prompt: "[harness:cross-check impact] Check impact.md, impact.json before the person approves it."
+    send: true
+    model: "Claude Opus 5.5 (copilot)"
   - label: Revise
     agent: "Impact Analyst"
     prompt: "[harness:revise impact] "

@@ -4,6 +4,7 @@ name: "Griller"
 description: "Clarifies the requirement with grill-me before any analysis."
 tools: ['read', 'search', 'edit', 'agent', 'atlassian/getAccessibleAtlassianResources', 'atlassian/getJiraIssue', 'atlassian/searchJiraIssuesUsingJql', 'atlassian/listJiraIssueRemoteIssueLinks', 'atlassian/searchConfluence', 'atlassian/getConfluenceContent', 'codegraph/*', 'extras-grill']
 agents: ['Component Scout']
+model: ['Claude Opus 5.5 (copilot)', 'GPT-5.5 (copilot)']
 hooks:
   UserPromptSubmit:
     - type: command

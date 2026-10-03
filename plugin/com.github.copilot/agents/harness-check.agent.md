@@ -3,6 +3,7 @@
 name: "Harness Check"
 description: "Checks that each harness capability answers, and reports the fix for any that does not."
 tools: ['read', 'execute', 'atlassian/getAccessibleAtlassianResources', 'atlassian/getJiraIssue', 'atlassian/searchJiraIssuesUsingJql', 'atlassian/listJiraIssueRemoteIssueLinks', 'atlassian/searchConfluence', 'atlassian/getConfluenceContent', 'codegraph/*', 'github-ro/get_file_contents', 'github-ro/list_commits', 'github-ro/get_commit', 'github-ro/list_pull_requests', 'github-ro/get_pull_request', 'github-ro/search_code', 'ctx/*']
+model: ['Claude Haiku 4.5 (copilot)', 'GPT-5 mini (copilot)']
 user-invocable: false
 hooks:
   UserPromptSubmit:
