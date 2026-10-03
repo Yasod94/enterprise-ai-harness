@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "change-harness"
-version = "0.1.0"
-description = "Copilot (VS Code) change workflow harness: grill, impact, plan, approve, implement, verify."
+version = "0.2.0"
+description = "Build tool for the change-harness VS Code agent plugin: grill, impact, plan, approve, implement, verify."
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = ["PyYAML>=6.0"]

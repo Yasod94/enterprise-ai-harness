@@ -1,0 +1,45 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+  "mcpServers": {
+    "github-ro": {
+      "type": "http",
+      "url": "https://api.githubcopilot.com/mcp/",
+      "headers": {
+        "X-MCP-Toolsets": "repos,pull_requests,issues",
+        "X-MCP-Readonly": "true"
+      }
+    },
+    "github-rw": {
+      "type": "http",
+      "url": "https://api.githubcopilot.com/mcp/",
+      "headers": {
+        "X-MCP-Toolsets": "pull_requests,issues"
+      }
+    },
+    "atlassian": {
+      "type": "http",
+      "url": "https://mcp.atlassian.com/v1/mcp/authv2"
+    },
+    "codegraph": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@colbymchenry/codegraph@1.6.1",
+        "serve",
+        "--mcp"
+      ],
+      "env": {
+        "DO_NOT_TRACK": "1"
+      }
+    },
+    "ctx": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "context-mode"
+      ]
+    }
+  }
+}

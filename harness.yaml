@@ -1,0 +1,273 @@
+# Team configuration for the change-harness VS Code plugin.
+#
+# Edit this file (or run `harness add ...`), then `harness build` to regenerate
+# plugin/. Developers install the plugin once; nothing is added to service repos
+# except the optional code graph seed (.codegraph-seed/).
+# Agents and skills only ever name capabilities (tickets.read, code.graph, ...);
+# this file is the one place that decides which server answers each capability.
+
+version: 1
+
+plugin:
+  name: change-harness
+  version: 0.2.0
+  description: Copilot change workflow with a review after every stage, approval-gated code edits and swappable MCP tools.
+  repository: https://github.com/<org>/change-harness
+  license: MIT
+  # If VS Code lists this plugin's MCP tools with a prefix (for example
+  # "change-harness.codegraph/..."), set that prefix here and rebuild.
+  server_prefix: ""
+
+# Run files (.changes/<run-id>/) stay in the developer's clone by default and are
+# hidden from git through .git/info/exclude. Set commit: true to commit them with
+# the PR so the team can see the requirement, decisions and plan.
+runs:
+  commit: false
+
+# MCP servers. `type: http` servers sign in through the browser (OAuth) the first
+# time they are used. `type: stdio` servers are started by VS Code on demand.
+# `est_tools` is the approximate number of tools the server exposes; `harness doctor`
+# uses it to check the 128-tool cap and estimate tool-definition tokens per stage.
+servers:
+  github-ro:
+    type: http
+    url: https://api.githubcopilot.com/mcp/
+    headers:
+      X-MCP-Toolsets: repos,pull_requests,issues
+      X-MCP-Readonly: "true"
+    est_tools: 30
+  github-rw:
+    type: http
+    url: https://api.githubcopilot.com/mcp/
+    headers:
+      X-MCP-Toolsets: pull_requests,issues
+    # Only these tools are given to agents, so the write server stays narrow.
+    tools: [create_pull_request, update_pull_request, add_issue_comment]
+    est_tools: 3
+  atlassian:
+    type: http
+    url: https://mcp.atlassian.com/v1/mcp/authv2
+    # Rovo exposes about 120 tools; agents only get this read set unless a
+    # capability names its own tools below.
+    tools: [getAccessibleAtlassianResources, getJiraIssue, searchJiraIssuesUsingJql, listJiraIssueRemoteIssueLinks]
+    est_tools: 120
+  kb:
+    # Your KB MCP: architecture graph plus Confluence content. Fill in before rollout.
+    type: http
+    url: <kb-mcp-url>
+    est_tools: 8
+  codegraph:
+    type: stdio
+    command: npx
+    args: [-y, "@colbymchenry/codegraph@1.6.1", serve, --mcp]
+    env:
+      DO_NOT_TRACK: "1"        # CodeGraph telemetry off
+    est_tools: 1
+  ctx:
+    type: stdio
+    command: npx
+    args: [-y, context-mode]
+    est_tools: 8
+  orders-db-ro:
+    # Optional read-only schema access. Leave disabled until a server is approved.
+    type: stdio
+    command: <approved-postgres-mcp>
+    enabled: false
+    est_tools: 4
+
+# Capabilities map a stable name to a server. `alt` lists servers to use when
+# `bind` is not configured. `tools` narrows the server to named tools for this
+# capability: a list applies to `bind`, a map gives a list per server. `fallback` is what an agent does when no server answers; the
+# review card says it was used.
+capabilities:
+  tickets.read:
+    bind: atlassian
+    fallback: Ask the person to paste the ticket summary and acceptance criteria.
+  tickets.write:
+    bind: atlassian
+    tools: [getAccessibleAtlassianResources, getJiraIssue, listJiraIssueTransitions, transitionJiraIssue, addOrEditJiraIssueComment]
+    fallback: Tell the person which ticket update to make by hand.
+  docs.search:
+    bind: kb
+    alt: [atlassian]          # used when kb is not configured
+    tools:
+      atlassian: [getAccessibleAtlassianResources, searchConfluence, getConfluenceContent]
+    fallback: Ask the person for page links.
+  arch.graph:
+    bind: kb
+    fallback: Use docs.search and the code itself, and say the architecture graph was unavailable.
+  code.graph:
+    bind: codegraph
+    setup: npx -y @colbymchenry/codegraph@1.6.1 init --yes    # builds the index once per repo, no prompts
+    # The working index is local (.codegraph/, ignored by CodeGraph itself). A
+    # compressed snapshot, the seed, is committed in .codegraph-seed/ so a fresh
+    # clone restores it instead of building from scratch.
+    index:
+      dir: .codegraph
+      file: codegraph.db
+      sync: npx -y @colbymchenry/codegraph@1.6.1 sync --quiet
+      seed_dir: .codegraph-seed
+      # When the Reviewer refreshes the committed seed on verify approval:
+      #   stale     only if the seed is older than seed_max_age_days (default; few merge conflicts)
+      #   every-pr  in every PR that changes code (every open PR then conflicts on the seed)
+      #   manual    only when someone types "save code graph" to the orchestrator
+      seed_refresh: stale
+      seed_max_age_days: 7
+    fallback: Use search/codebase, search/usages and read the files directly.
+  db.schema:
+    bind: orders-db-ro
+    fallback: Read the schema migration files in the repo (for example db/migration, flyway, liquibase).
+  repo.read:
+    bind: github-ro
+    tools: [get_file_contents, list_commits, get_commit, list_pull_requests, get_pull_request, search_code]
+    fallback: Use git log, git show and git blame in the terminal.
+  repo.write:
+    bind: github-rw
+    fallback: Give the person a PR title and body to paste.
+  output.sandbox:
+    bind: ctx
+    fallback: Pipe long command output through tail or grep before reading it.
+
+# Stages in run order. Each stage's review approves its artifacts.
+stages:
+  - id: intake
+    agent: intake
+    artifacts: [requirement.md]
+  - id: grill
+    agent: griller
+    artifacts: [clarifications.md]
+  - id: impact
+    agent: impact-analyst
+    artifacts: [impact.md, impact.json]
+  - id: plan
+    agent: planner
+    artifacts: [plan.md]
+  - id: implement
+    agent: implementer
+    artifacts: [progress.md]
+  - id: verify
+    agent: reviewer
+    artifacts: [verification.md]
+
+# Agents. `builtin` are VS Code tool sets, `capabilities` become MCP tool
+# allowlists, `skills` are loaded by file reference at the start of the agent
+# (keep this short: other skills still load on demand from their description).
+# Extra team skills added with `harness add skill` are listed under `skills:`
+# at the end of this file.
+agents:
+  change-orchestrator:
+    name: Change Orchestrator
+    description: Start, resume or steer a change run. Type a Jira key or describe the change.
+    builtin: [read, search, edit, execute]
+    subagents: [harness-check]
+    skills: [change-artifacts]
+    scope: orchestrator
+  harness-check:
+    name: Harness Check
+    description: Checks that each harness capability answers, and reports the fix for any that does not.
+    builtin: [read, execute]
+    capabilities: [tickets.read, docs.search, arch.graph, code.graph, db.schema, repo.read, output.sandbox]
+    user_invocable: false
+    show_setup: true
+    scope: check
+  intake:
+    name: Intake
+    description: Turns a Jira ticket or a plain request into requirement.md.
+    builtin: [read, search, edit]
+    capabilities: [tickets.read, docs.search]
+    skills: [change-artifacts, intake]
+    scope: intake
+  griller:
+    name: Griller
+    description: Clarifies the requirement with grill-me before any analysis.
+    builtin: [read, search, edit, agent]
+    capabilities: [tickets.read, docs.search, code.graph, arch.graph]
+    subagents: [component-scout]
+    skills: [change-artifacts, grill-me, grilling]
+    scope: grill
+  impact-analyst:
+    name: Impact Analyst
+    description: Finds the components a change touches, with evidence, and writes impact.md and impact.json.
+    builtin: [read, search, edit, agent]
+    capabilities: [arch.graph, code.graph, docs.search, output.sandbox]
+    subagents: [component-scout]
+    skills: [change-artifacts, impact-analysis]
+    scope: impact
+  component-scout:
+    name: Component Scout
+    description: Read-only look at one component or one fact, returning a short evidence summary.
+    builtin: [read, search]
+    capabilities: [code.graph, arch.graph, db.schema, repo.read, docs.search, output.sandbox]
+    user_invocable: false
+    scope: scout
+  planner:
+    name: Planner
+    description: Writes plan.md, the per-component changes and task list, from the approved impact.
+    builtin: [read, search, edit]
+    capabilities: [code.graph, arch.graph, docs.search]
+    skills: [change-artifacts, plan-format]
+    scope: plan
+  implementer:
+    name: Implementer
+    description: Runs the approved plan one task at a time, with tests after each task.
+    builtin: [read, search, edit, execute, agent, todos]
+    capabilities: [code.graph, output.sandbox]
+    subagents: [task-runner]
+    skills: [change-artifacts]
+    scope: implement
+  task-runner:
+    name: Task Runner
+    description: Implements exactly one plan task with the smallest change that passes its check.
+    builtin: [read, search, edit, execute]
+    capabilities: [code.graph, output.sandbox]
+    user_invocable: false
+    scope: implement-task
+  reviewer:
+    name: Reviewer
+    description: Checks the diff against the plan, runs the full test suite and opens the PR.
+    builtin: [read, search, edit, execute]
+    capabilities: [repo.write, tickets.write, output.sandbox]
+    skills: [change-artifacts, code-review]
+    scope: verify
+
+# Review after each stage. `required` for every stage except implement, which
+# can review per task or per batch of N tasks. Plan approval is always enforced
+# by the hook, whatever is set here.
+review:
+  intake: required
+  grill: required
+  impact: required
+  plan: required
+  implement: per-task       # or: per-batch-3
+  verify: required
+
+# Budgets per agent scope, counted by the hook. At the limit, further tool calls are
+# denied and the agent shows its review card. Type "extend" to add 50%.
+# Developers can override review modes and budgets for themselves in
+# ~/.copilot/change-harness.local.yaml.
+budgets:
+  orchestrator: { tool_calls: 30 }
+  check: { tool_calls: 20 }
+  intake: { tool_calls: 20 }
+  grill: { tool_calls: 40 }
+  impact: { tool_calls: 80, output_kb: 200 }
+  scout: { tool_calls: 25 }
+  plan: { tool_calls: 40 }
+  implement: { tool_calls: 300, output_kb: 600 }
+  implement-task: { tool_calls: 30 }
+  verify: { tool_calls: 40 }
+
+# Optional model per agent, as a prioritized list of names from the VS Code model
+# picker, e.g. griller: ["<strongest model> (copilot)"]. Empty means the picker's model.
+models: {}
+
+hooks:
+  audit: false                 # log every tool name and argument keys to .changes/.audit.log
+  edit_tools: "(edit|create|write|replace|insert|patch|delete|rename|move)"
+  terminal_tools: "(terminal|runInTerminal|run_in_terminal|execute|command)"
+  subagent_tools: "(subagent|runSubagent)"
+  out_of_plan_files: ask       # edits to files not in impact.json: ask | allow | deny
+
+# Extra team skills: vendored under sources/skills/vendor/ by `harness add skill`.
+# `stages` makes those stage agents load the skill at start.
+skills: []

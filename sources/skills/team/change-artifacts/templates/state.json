@@ -1,0 +1,12 @@
+{
+  "run": "<run-id>",
+  "source": "jira | prompt",
+  "request": "<original request text, for prompt runs>",
+  "branch": "change/<run-id>",
+  "stage": "intake",
+  "stage_status": "working",
+  "summary": "",
+  "created_at": "<ISO 8601>",
+  "approvals": {},
+  "usage": {}
+}

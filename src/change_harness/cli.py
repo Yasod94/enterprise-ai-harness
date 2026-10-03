@@ -1,7 +1,7 @@
-"""Command line for harness maintainers and the PR workflow.
+"""Command line for the harness maintainer, run inside the harness repo.
 
-Developers never need this: they open the repo in VS Code and pick the Change
-Orchestrator agent. The commands here render and check the committed files.
+Developers do not need it: they install the plugin in VS Code. `install-user`
+is the fallback for machines where agent plugins are not allowed.
 """
 
 from __future__ import annotations
@@ -12,89 +12,61 @@ import sys
 from pathlib import Path
 
 from change_harness import __version__
-from change_harness.config import DATA, EXTENSIONS_PATH, ConfigError
+from change_harness.build import BuildReport, build
+from change_harness.config import ConfigError, load
 from change_harness.doctor import check, summarize
-from change_harness.extend import ExtendError, add_server, add_skill, ensure_extensions_file
-from change_harness.render import SyncReport, sync
+from change_harness.extend import ExtendError, add_server, add_skill
+from change_harness.install import install_user
 
 
 def _csv(value: str | None) -> list[str] | None:
     return [v.strip() for v in value.split(",") if v.strip()] if value else None
 
 
-def print_report(report: SyncReport, check_mode: bool) -> None:
-    verb = "would write" if check_mode else "wrote"
+def print_build(report: BuildReport, check_mode: bool) -> None:
     for path in report.written:
-        print(f"  {verb} {path}")
+        print(f"  {'would write' if check_mode else 'wrote'} {path}")
     for path in report.removed:
         print(f"  {'would remove' if check_mode else 'removed'} {path}")
-    for path in report.conflicts:
-        print(f"  ! skipped {path}: changed by hand (use --force to overwrite)")
-    for name in report.overrides:
-        print(f"  · skill {name} is provided by this repo; harness version not rendered")
     for name in report.skipped_servers:
-        print(f"  · server {name} not rendered (disabled or placeholder); its capabilities use their fallback")
-    for note in report.notes:
-        print(f"  · {note}")
-    if not (report.written or report.removed or report.conflicts):
-        print("  up to date")
+        print(f"  · server {name} left out (disabled or placeholder); its capabilities use their fallback")
+    if not report.changed:
+        print("  plugin is up to date")
 
 
-def cmd_init(args) -> int:
-    repo = Path(args.repo).resolve()
-    if not (repo / ".git").exists() and not args.no_git_check:
-        print(f"{repo} is not a git repository (use --no-git-check to continue anyway)", file=sys.stderr)
-        return 2
-    ensure_extensions_file(repo)
-    memory = repo / ".harness/memory"
-    for name in ("conventions.md", "decisions.md"):
-        target = memory / name
-        if not target.exists():
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text((DATA / "repo" / "memory" / name).read_text(encoding="utf-8"), encoding="utf-8")
-    example = repo / ".harness/harness.local.example.yaml"
-    if not example.exists():
-        example.write_text((DATA / "repo" / "harness.local.example.yaml").read_text(encoding="utf-8"), encoding="utf-8")
-    print(f"change-harness {__version__}: initialising {repo}")
-    report = sync(repo, force=args.force, source=args.source)
-    print_report(report, False)
-    text, code = summarize(check(repo))
-    print("\nDoctor:\n" + text)
-    print("\nNext: commit the rendered files. Developers open the repo in VS Code and pick Change Orchestrator.")
-    return code
-
-
-def cmd_sync(args) -> int:
-    repo = Path(args.repo).resolve()
-    report = sync(repo, check=args.check, force=args.force, source=args.source)
-    print_report(report, args.check)
-    if args.check and report.changed:
-        return 1
-    return 1 if report.conflicts and not args.force else 0
+def cmd_build(args) -> int:
+    cfg = load(args.root)
+    report = build(cfg, check=args.check)
+    print_build(report, args.check)
+    return 1 if args.check and report.changed else 0
 
 
 def cmd_doctor(args) -> int:
-    text, code = summarize(check(Path(args.repo), live=args.live))
+    text, code = summarize(check(args.root, live=args.live))
     print(text)
     return code
 
 
 def cmd_add(args) -> int:
-    repo = Path(args.repo).resolve()
+    cfg = load(args.root)
     if args.kind == "skill":
-        messages = add_skill(repo, args.source, skill=args.skill, stages=_csv(args.stages), name=args.name)
+        messages = add_skill(cfg, args.source, skill=args.skill, stages=_csv(args.stages), name=args.name)
     else:
-        messages = add_server(repo, args.name, url=args.url, command=args.command, args=args.arg,
+        messages = add_server(cfg, args.name, url=args.url, command=args.command, args=args.arg,
                               stages=_csv(args.stages), tools=_csv(args.tools), est_tools=args.est_tools,
                               capability=args.capability)
     for m in messages:
         print(f"  {m}")
-    if args.no_sync:
-        print(f"  run `harness sync` (or open a PR) to render the change")
-        return 0
-    report = sync(repo)
-    print_report(report, False)
-    print(f"\nCommit {EXTENSIONS_PATH} and the rendered files, then open a PR.")
+    print_build(build(load(cfg.root)), False)
+    print("\nCommit the change, open a PR, and bump plugin.version when you release.")
+    return 0
+
+
+def cmd_install_user(args) -> int:
+    cfg = load(args.root)
+    for m in install_user(cfg, copilot_dir=args.copilot_dir, vscode_user_dir=args.vscode_user_dir,
+                          uninstall=args.uninstall):
+        print(f"  {m}")
     return 0
 
 
@@ -104,56 +76,39 @@ def cmd_status(args) -> int:
     current = (changes / "current").read_text().strip() if (changes / "current").exists() else None
     runs = sorted(changes.glob("*/state.json")) if changes.exists() else []
     if not runs:
-        print("no runs yet")
+        print("no runs in this clone")
         return 0
     for state_file in runs:
         state = json.loads(state_file.read_text(encoding="utf-8"))
         run = state_file.parent.name
         approved = [k for k in (state.get("approvals") or {}) if k != "tasks"]
-        marker = "*" if run == current else " "
-        print(f"{marker} {run:40} stage {state.get('stage', '?'):10} {state.get('stage_status', ''):8} "
-              f"approved: {', '.join(approved) or 'none'}")
+        print(f"{'*' if run == current else ' '} {run:40} stage {state.get('stage', '?'):10} "
+              f"{state.get('stage_status', ''):8} approved: {', '.join(approved) or 'none'}")
     return 0
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="harness", description="Copilot change workflow harness")
+    p = argparse.ArgumentParser(prog="harness", description="Build and check the change-harness plugin")
     p.add_argument("--version", action="version", version=f"change-harness {__version__}")
+    p.add_argument("--root", type=Path, default=None, help="harness repo root (default: found from the current folder)")
     sub = p.add_subparsers(dest="cmd", required=True)
 
-    def repo_arg(sp):
-        sp.add_argument("--repo", default=".", help="service repo root (default: current directory)")
+    sp = sub.add_parser("build", help="render plugin/ and the marketplace manifest from sources/ and harness.yaml")
+    sp.add_argument("--check", action="store_true", help="exit 1 if plugin/ is out of date (CI)")
+    sp.set_defaults(func=cmd_build)
 
-    sp = sub.add_parser("init", help="set up a service repo (run once, then commit)")
-    repo_arg(sp)
-    sp.add_argument("--source", help="git URL of the change-harness repo, recorded for the PR workflow")
-    sp.add_argument("--force", action="store_true", help="overwrite existing files with the same paths")
-    sp.add_argument("--no-git-check", action="store_true")
-    sp.set_defaults(func=cmd_init)
-
-    sp = sub.add_parser("sync", help="render agents, skills, hooks and mcp.json from config")
-    repo_arg(sp)
-    sp.add_argument("--check", action="store_true", help="exit 1 if anything would change (CI)")
-    sp.add_argument("--force", action="store_true", help="overwrite files edited by hand")
-    sp.add_argument("--source", help="update the recorded harness source URL")
-    sp.set_defaults(func=cmd_sync)
-
-    sp = sub.add_parser("doctor", help="check configuration, tool counts, skills and secrets")
-    repo_arg(sp)
+    sp = sub.add_parser("doctor", help="check configuration, tool counts, skills, secrets and build state")
     sp.add_argument("--live", action="store_true", help="also check that servers are reachable from here")
     sp.set_defaults(func=cmd_doctor)
 
-    sp = sub.add_parser("add", help="add a skill or MCP server for this repo")
+    sp = sub.add_parser("add", help="add a team skill or MCP server, then rebuild")
     add_sub = sp.add_subparsers(dest="kind", required=True)
-    sk = add_sub.add_parser("skill", help="vendor a skill from GitHub or register a local folder")
-    repo_arg(sk)
-    sk.add_argument("source", help="owner/repo[@ref], github:owner/repo, or a local folder with SKILL.md")
+    sk = add_sub.add_parser("skill", help="vendor a skill from GitHub or copy a local skill folder")
+    sk.add_argument("source", help="owner/repo[@ref] or a local folder with SKILL.md")
     sk.add_argument("--skill", help="skill folder name inside the repo (e.g. grill-with-docs)")
     sk.add_argument("--name", help="name to install it under (default: the skill name)")
     sk.add_argument("--stages", help="comma-separated stages that load it at start")
-    sk.add_argument("--no-sync", action="store_true")
     sv = add_sub.add_parser("server", help="add an MCP server")
-    repo_arg(sv)
     sv.add_argument("name")
     sv.add_argument("--url", help="http server URL")
     sv.add_argument("--command", help="stdio server command")
@@ -161,12 +116,17 @@ def build_parser() -> argparse.ArgumentParser:
     sv.add_argument("--stages", help="comma-separated stages whose agents get its tools")
     sv.add_argument("--tools", help="comma-separated tool names to allow (recommended)")
     sv.add_argument("--est-tools", type=int, help="number of tools the server exposes, for doctor")
-    sv.add_argument("--capability", help="bind an existing capability to this server for this repo")
-    sv.add_argument("--no-sync", action="store_true")
+    sv.add_argument("--capability", help="point an existing capability at this server")
     sp.set_defaults(func=cmd_add)
 
-    sp = sub.add_parser("status", help="list change runs in this repo")
-    repo_arg(sp)
+    sp = sub.add_parser("install-user", help="fallback: install into ~/.copilot and the VS Code user mcp.json")
+    sp.add_argument("--copilot-dir", type=Path)
+    sp.add_argument("--vscode-user-dir", type=Path)
+    sp.add_argument("--uninstall", action="store_true")
+    sp.set_defaults(func=cmd_install_user)
+
+    sp = sub.add_parser("status", help="list change runs in a service repo clone")
+    sp.add_argument("--repo", default=".")
     sp.set_defaults(func=cmd_status)
     return p
 
@@ -175,7 +135,7 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
         return args.func(args)
-    except (ConfigError, ExtendError) as exc:
+    except (ConfigError, ExtendError, FileNotFoundError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
 

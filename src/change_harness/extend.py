@@ -1,4 +1,4 @@
-"""Add skills and MCP servers to a service repo through .harness/extensions.yaml."""
+"""Add team skills and MCP servers to the plugin's harness.yaml (comments are kept)."""
 
 from __future__ import annotations
 
@@ -11,9 +11,8 @@ from pathlib import Path
 
 import yaml
 
-from change_harness.config import DATA, EXTENSIONS_PATH, Config
+from change_harness.config import CONFIG_FILE, Config
 
-SKILLS_DIR = Path(".github/skills")
 GITHUB_RE = re.compile(r"^(?:github:|https://github\.com/)?([\w.-]+)/([\w.-]+?)(?:\.git)?(?:@([\w./-]+))?$")
 
 
@@ -21,31 +20,45 @@ class ExtendError(Exception):
     pass
 
 
-# ---------- extensions.yaml text editing (keeps comments) ----------
-
-def ensure_extensions_file(repo: Path) -> Path:
-    path = repo / EXTENSIONS_PATH
-    if not path.exists():
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text((DATA / "repo" / "extensions.yaml").read_text(encoding="utf-8"), encoding="utf-8")
-    return path
-
+# ---------- harness.yaml text editing ----------
 
 def insert_entry(text: str, key: str, entry_yaml: str) -> str:
-    """Insert an already-indented YAML block under a top-level key."""
+    """Insert an already-indented YAML block right under a top-level key."""
     lines = text.splitlines()
     block = entry_yaml.rstrip("\n").splitlines()
     for i, line in enumerate(lines):
         m = re.match(rf"^{re.escape(key)}:\s*(.*?)\s*(#.*)?$", line)
         if not m:
             continue
-        rest = m.group(1)
-        if rest not in ("", "[]", "{}"):
-            raise ExtendError(f"{EXTENSIONS_PATH}: write `{key}` as a block (not inline) to add entries automatically")
+        if m.group(1) not in ("", "[]", "{}"):
+            raise ExtendError(f"write `{key}` as a block (not inline) to add entries automatically")
         lines[i] = f"{key}:"
         lines[i + 1:i + 1] = block
         return "\n".join(lines) + "\n"
-    return text.rstrip("\n") + f"\n{key}:\n" + "\n".join(block) + "\n"
+    return text.rstrip("\n") + f"\n\n{key}:\n" + "\n".join(block) + "\n"
+
+
+def rebind_capability(text: str, cap: str, server: str) -> str:
+    """Change `bind:` of one capability under the top-level `capabilities:` block."""
+    lines = text.splitlines()
+    in_caps = in_cap = False
+    for i, line in enumerate(lines):
+        if re.match(r"^capabilities:\s*(#.*)?$", line):
+            in_caps = True
+            continue
+        if in_caps and re.match(r"^\S", line) and line.strip() and not line.startswith("#"):
+            break
+        if in_caps and re.match(rf"^  {re.escape(cap)}:\s*(#.*)?$", line):
+            in_cap = True
+            continue
+        if in_cap:
+            if re.match(r"^  \S", line):
+                break
+            m = re.match(r"^(\s+bind:\s*)([^\s#]+)(.*)$", line)
+            if m:
+                lines[i] = f"{m.group(1)}{server}{m.group(3)}"
+                return "\n".join(lines) + "\n"
+    raise ExtendError(f"capability {cap} with a `bind:` line not found in {CONFIG_FILE}")
 
 
 def indent(text: str, spaces: int = 2) -> str:
@@ -53,19 +66,18 @@ def indent(text: str, spaces: int = 2) -> str:
     return "\n".join(pad + line if line else line for line in text.splitlines()) + "\n"
 
 
-def _write_extensions(path: Path, new_text: str) -> None:
-    data = yaml.safe_load(new_text)
-    if not isinstance(data, dict):
-        raise ExtendError("extensions.yaml would no longer be a mapping; not written")
+def _write_config(path: Path, new_text: str) -> None:
+    if not isinstance(yaml.safe_load(new_text), dict):
+        raise ExtendError(f"{CONFIG_FILE} would no longer be a mapping; not written")
     path.write_text(new_text, encoding="utf-8")
 
 
-# ---------- GitHub skill vendoring ----------
+# ---------- GitHub vendoring ----------
 
 def parse_github(source: str) -> tuple[str, str, str | None]:
     m = GITHUB_RE.match(source.strip())
     if not m:
-        raise ExtendError(f"not a GitHub source: {source} (use owner/repo, github:owner/repo or a local folder)")
+        raise ExtendError(f"not a GitHub source: {source} (use owner/repo[@ref] or a local folder)")
     return m.group(1), m.group(2), m.group(3)
 
 
@@ -76,9 +88,8 @@ def _git(args: list[str], cwd: Path) -> str:
     return result.stdout.strip()
 
 
-def vendor_github_skill(repo: Path, owner: str, name: str, skill: str | None, ref: str | None,
-                        dest_name: str) -> str:
-    """Copy one skill folder from GitHub into .github/skills/<dest_name>/. Returns the commit."""
+def vendor_github_skill(dest: Path, owner: str, name: str, skill: str | None, ref: str | None) -> str:
+    """Copy one skill folder from GitHub into `dest`, with SOURCE.md and LICENSE. Returns the commit."""
     with tempfile.TemporaryDirectory() as tmp:
         work = Path(tmp)
         _git(["init", "-q"], work)
@@ -94,7 +105,6 @@ def vendor_github_skill(repo: Path, owner: str, name: str, skill: str | None, re
             found = sorted({p.parent.name for p in work.rglob("SKILL.md")})
             raise ExtendError(f"skill {skill or '(root)'} not found in {owner}/{name}. Found: {', '.join(found[:20])}")
         src = matches[0]
-        dest = repo / SKILLS_DIR / dest_name
         if dest.exists():
             shutil.rmtree(dest)
         shutil.copytree(src, dest, ignore=shutil.ignore_patterns(".git", "agents"))
@@ -110,68 +120,58 @@ def vendor_github_skill(repo: Path, owner: str, name: str, skill: str | None, re
             f"- Path: {rel}\n"
             f"- Commit: {commit}\n"
             f"- License: {license_line}. Full text in LICENSE next to this file.\n"
-            f"- Vendored: {date.today().isoformat()} by change-harness. Review it like code before merging.\n",
+            f"- Vendored: {date.today().isoformat()} by change-harness. Do not edit; put harness rules in the agent that loads it.\n",
             encoding="utf-8",
         )
         return commit
 
 
-def vendor_missing_github_skills(cfg: Config) -> list[str]:
-    notes = []
-    for entry in cfg.skills_ext:
-        source = entry.get("source", "")
-        if not source.startswith("github:"):
-            continue
-        dest = cfg.repo / SKILLS_DIR / entry["name"]
-        if (dest / "SKILL.md").exists():
-            continue
-        try:
-            owner, name, ref = parse_github(source)
-            commit = vendor_github_skill(cfg.repo, owner, name, entry.get("skill"), ref, entry["name"])
-            notes.append(f"vendored skill {entry['name']} from {owner}/{name}@{commit[:12]}")
-        except (ExtendError, OSError, subprocess.SubprocessError) as exc:
-            notes.append(f"could not vendor skill {entry['name']}: {exc}")
-    return notes
+# ---------- commands ----------
 
-
-# ---------- public commands ----------
-
-def add_skill(repo: Path, source: str, skill: str | None = None, stages: list[str] | None = None,
+def add_skill(cfg: Config, source: str, skill: str | None = None, stages: list[str] | None = None,
               name: str | None = None) -> list[str]:
-    path = ensure_extensions_file(repo)
-    current = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    local = (repo / source).resolve()
+    config_path = cfg.root / CONFIG_FILE
+    local = Path(source).expanduser()
+    local = local if local.is_absolute() else (Path.cwd() / local)
     if local.is_dir() and (local / "SKILL.md").exists():
         skill_name = name or skill or local.name
-        entry = {"name": skill_name, "source": local.relative_to(repo.resolve()).as_posix()}
-        messages = [f"added local skill {skill_name} from {entry['source']}"]
+        dest = cfg.sources / "skills" / "team" / skill_name
+        if dest.exists():
+            raise ExtendError(f"sources/skills/team/{skill_name} already exists")
+        shutil.copytree(local, dest, ignore=shutil.ignore_patterns(".git", "__pycache__"))
+        messages = [f"copied skill {skill_name} into sources/skills/team/{skill_name}"]
     else:
         owner, repo_name, ref = parse_github(source)
         skill_name = name or skill or repo_name
-        commit = vendor_github_skill(repo, owner, repo_name, skill, ref, skill_name)
-        entry = {"name": skill_name, "source": f"github:{owner}/{repo_name}@{commit}"}
-        if skill:
-            entry["skill"] = skill
-        messages = [f"vendored skill {skill_name} from {owner}/{repo_name}@{commit[:12]} into {SKILLS_DIR / skill_name}"]
-    if any(e.get("name") == skill_name for e in current.get("skills") or []):
-        raise ExtendError(f"skill {skill_name} is already in {EXTENSIONS_PATH}")
+        dest = cfg.sources / "skills" / "vendor" / skill_name
+        if dest.exists():
+            raise ExtendError(f"sources/skills/vendor/{skill_name} already exists")
+        commit = vendor_github_skill(dest, owner, repo_name, skill, ref)
+        messages = [f"vendored skill {skill_name} from {owner}/{repo_name}@{commit[:12]}"]
     if stages:
-        entry["stages"] = stages
-    text = insert_entry(path.read_text(encoding="utf-8"), "skills", indent(yaml.safe_dump([entry], sort_keys=False)))
-    _write_extensions(path, text)
-    messages.append(f"added skill {skill_name} to {EXTENSIONS_PATH}")
+        bad = [s for s in stages if s not in cfg.stage_ids]
+        if bad:
+            raise ExtendError(f"unknown stage(s): {', '.join(bad)}")
+        entry = {"name": skill_name, "stages": stages}
+        text = insert_entry(config_path.read_text(encoding="utf-8"), "skills",
+                            indent(yaml.safe_dump([entry], sort_keys=False, default_flow_style=None)))
+        _write_config(config_path, text)
+        messages.append(f"stages {', '.join(stages)} load {skill_name} at start")
+    else:
+        messages.append(f"{skill_name} loads on demand from its description")
     return messages
 
 
-def add_server(repo: Path, name: str, url: str | None = None, command: str | None = None,
+def add_server(cfg: Config, name: str, url: str | None = None, command: str | None = None,
                args: list[str] | None = None, stages: list[str] | None = None, tools: list[str] | None = None,
                est_tools: int | None = None, capability: str | None = None) -> list[str]:
     if bool(url) == bool(command):
         raise ExtendError("give either --url (http server) or --command (stdio server)")
-    path = ensure_extensions_file(repo)
-    current = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    if name in (current.get("servers") or {}):
-        raise ExtendError(f"server {name} is already in {EXTENSIONS_PATH}")
+    if name in cfg.servers:
+        raise ExtendError(f"server {name} is already in {CONFIG_FILE}")
+    if capability and capability not in cfg.capabilities:
+        raise ExtendError(f"unknown capability {capability}")
+    config_path = cfg.root / CONFIG_FILE
     entry: dict = {"type": "http", "url": url} if url else {"type": "stdio", "command": command}
     if args:
         entry["args"] = args
@@ -180,14 +180,13 @@ def add_server(repo: Path, name: str, url: str | None = None, command: str | Non
     if tools:
         entry["tools"] = tools
     entry["est_tools"] = est_tools or (len(tools) if tools else 20)
-    text = insert_entry(path.read_text(encoding="utf-8"), "servers", indent(yaml.safe_dump({name: entry}, sort_keys=False)))
-    messages = [f"added server {name} to {EXTENSIONS_PATH}"]
+    text = insert_entry(config_path.read_text(encoding="utf-8"), "servers",
+                        indent(yaml.safe_dump({name: entry}, sort_keys=False, default_flow_style=None)))
+    messages = [f"added server {name}"]
     if capability:
-        if capability in (current.get("capabilities") or {}):
-            raise ExtendError(f"capability {capability} is already overridden in {EXTENSIONS_PATH}")
-        text = insert_entry(text, "capabilities", indent(yaml.safe_dump({capability: {"bind": name}}, sort_keys=False)))
-        messages.append(f"bound capability {capability} to {name} for this repo")
-    _write_extensions(path, text)
+        text = rebind_capability(text, capability, name)
+        messages.append(f"capability {capability} now uses {name}")
+    _write_config(config_path, text)
     if not stages and not capability:
         messages.append("note: no --stages or --capability given, so no agent gets these tools yet")
     return messages

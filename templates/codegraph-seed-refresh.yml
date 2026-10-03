@@ -1,0 +1,46 @@
+# Optional. Copy to .github/workflows/ in a service repo to refresh the committed
+# code graph seed from the default branch once a week, as its only writer.
+# Pair it with `seed_refresh: manual` in the harness so change PRs stop
+# refreshing the seed and seed conflicts between open PRs go away.
+name: Refresh code graph seed
+
+on:
+  schedule:
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    env:
+      CODEGRAPH: npx -y @colbymchenry/codegraph@1.6.1   # keep in step with harness.yaml
+      DO_NOT_TRACK: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: <org>/change-harness
+          path: .harness-tmp
+          # token: ${{ secrets.CHANGE_HARNESS_READ_TOKEN }}   # if the harness repo is private
+      - name: Move the harness out of the workspace so it is not indexed
+        run: mv .harness-tmp "$RUNNER_TEMP/harness"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Update the index
+        run: |
+          node "$RUNNER_TEMP/harness/plugin/scripts/codegraph-index.cjs" restore .
+          if [ -f .codegraph/codegraph.db ]; then $CODEGRAPH sync --quiet; else $CODEGRAPH init --yes; fi
+      - name: Save the seed
+        run: node "$RUNNER_TEMP/harness/plugin/scripts/codegraph-index.cjs" save .
+      - uses: peter-evans/create-pull-request@v7
+        with:
+          branch: codegraph-seed-refresh
+          add-paths: .codegraph-seed/
+          commit-message: Refresh code graph seed
+          title: Refresh code graph seed
+          body: Weekly refresh of the committed CodeGraph index snapshot (.codegraph-seed/).

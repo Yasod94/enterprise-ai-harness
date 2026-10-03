@@ -14,7 +14,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Tests (CLI and hook)
+      - name: Script syntax
+        run: |
+          for f in sources/scripts/*.cjs plugin/scripts/*.cjs; do node --check "$f"; done
+      - name: plugin/ matches sources/ and harness.yaml
+        run: uv run harness build --check
+      - name: Tests
         run: uv run --extra test pytest -q
-      - name: Hook script syntax
-        run: node --check src/change_harness/data/hooks/harness-hook.cjs
+      - name: End-to-end with the real CodeGraph CLI
+        env:
+          CODEGRAPH_E2E: "1"
+          DO_NOT_TRACK: "1"
+        run: uv run --extra test pytest -q tests/test_codegraph_e2e.py

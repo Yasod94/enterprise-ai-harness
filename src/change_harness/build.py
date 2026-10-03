@@ -1,0 +1,262 @@
+"""Build the VS Code agent plugin (plugin/) and the marketplace manifest from sources/.
+
+Layout follows the Agent Plugins 1.0 format that VS Code reads:
+
+    plugin/plugin.json
+    plugin/mcp.json
+    plugin/skills/<name>/SKILL.md
+    plugin/scripts/                      hook and code graph scripts, config.json
+    plugin/com.github.copilot/agents/    custom agents
+    .github/plugin/marketplace.json      lets VS Code find the plugin in this repo
+"""
+
+from __future__ import annotations
+
+import json
+import re
+import stat
+from dataclasses import dataclass, field
+from pathlib import Path
+
+from change_harness.config import Config
+
+PLUGIN_DIR = "plugin"
+AGENTS_DIR = f"{PLUGIN_DIR}/com.github.copilot/agents"
+SKILLS_DIR = f"{PLUGIN_DIR}/skills"
+SCRIPTS_DIR = f"{PLUGIN_DIR}/scripts"
+MARKETPLACE = ".github/plugin/marketplace.json"
+PLUGIN_SCHEMA = "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json"
+MCP_SCHEMA = "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json"
+HOOK_CMD = 'node "${PLUGIN_ROOT}/scripts/harness-hook.cjs"'
+SKILL_LINK_PREFIX = "../../skills"  # from com.github.copilot/agents/ to skills/
+
+HOOK_EVENTS = [
+    ("UserPromptSubmit", "prompt", 120),   # may refresh the code graph seed
+    ("PreToolUse", "pre-tool", 15),
+    ("PostToolUse", "post-tool", 15),
+    ("PreCompact", "pre-compact", 15),
+]
+
+
+def q(text: str) -> str:
+    return json.dumps(text, ensure_ascii=False)
+
+
+def yaml_list(items: list[str]) -> str:
+    return "[" + ", ".join("'" + i.replace("'", "''") + "'" for i in items) + "]"
+
+
+# ---------- agents ----------
+
+def agent_name(cfg: Config, agent_id: str) -> str:
+    return cfg.agents[agent_id].get("name", agent_id)
+
+
+def render_frontmatter(cfg: Config, agent_id: str) -> str:
+    agent = cfg.agents[agent_id]
+    lines = [
+        f"# Built by change-harness from sources/agents/{agent_id}.agent.md. Do not edit here.",
+        f"name: {q(agent_name(cfg, agent_id))}",
+        f"description: {q(agent.get('description', ''))}",
+        f"tools: {yaml_list(cfg.tools_for(agent_id))}",
+    ]
+    subagents = agent.get("subagents") or []
+    if subagents:
+        lines.append(f"agents: {yaml_list([agent_name(cfg, s) for s in subagents])}")
+    models = (cfg.raw.get("models") or {}).get(agent_id)
+    if models:
+        lines.append(f"model: {yaml_list(models if isinstance(models, list) else [models])}")
+    if agent.get("user_invocable") is False:
+        lines.append("user-invocable: false")
+    lines.append("hooks:")
+    for event, mode, timeout in HOOK_EVENTS:
+        lines += [
+            f"  {event}:",
+            "    - type: command",
+            f"      command: {q(f'{HOOK_CMD} {mode} {agent['scope']}')}",
+            f"      timeout: {timeout}",
+        ]
+    return "\n".join(lines)
+
+
+def render_capabilities(cfg: Config, agent_id: str) -> str:
+    agent = cfg.agents[agent_id]
+    caps = agent.get("capabilities") or []
+    extra = cfg.stage_servers_for(agent_id)
+    stage = cfg.stage_of_scope(agent.get("scope", ""))
+    if not caps and not extra:
+        return ""
+    rows = ["## Capabilities", "", "| Capability | Tools | If unavailable |", "| --- | --- | --- |"]
+    for cap in caps:
+        spec = cfg.capabilities[cap]
+        tools = cfg.capability_tools(cap)
+        if tools:
+            cell = ", ".join(f"`{t}`" for t in tools)
+            if cfg.effective_bind(cap) != spec["bind"]:
+                cell += f" (standing in for {spec['bind']})"
+        else:
+            cell = f"not configured ({spec['bind']})"
+        rows.append(f"| {cap} | {cell} | {spec.get('fallback', 'Say it was unavailable.')} |")
+    for name in extra:
+        if cfg.server_usable(name):
+            rows.append(f"| team: {name} | {', '.join(f'`{t}`' for t in cfg.server_tools(name))} | Say it was unavailable. |")
+    if agent.get("show_setup"):
+        setups = [(c, cfg.capabilities[c]["setup"]) for c in caps if cfg.capabilities[c].get("setup")]
+        if setups:
+            rows += ["", "Setup commands (run in the terminal; it asks for approval):", ""]
+            rows += [f"- {c}: `{cmd}`" for c, cmd in setups]
+    if stage:
+        rows += ["", f"Tools the person added for themselves are in the `extras-{stage}` tool set, if it exists."]
+    return "\n".join(rows)
+
+
+def render_skill_refs(cfg: Config, agent_id: str) -> str:
+    skills = cfg.skills_for(agent_id)
+    if not skills:
+        return ""
+    lines = ["Before you start, read and follow these skills:", ""]
+    lines += [f"- [{s}]({SKILL_LINK_PREFIX}/{s}/SKILL.md)" for s in skills]
+    return "\n".join(lines)
+
+
+def render_agent(cfg: Config, agent_id: str) -> str:
+    template = (cfg.sources / "agents" / f"{agent_id}.agent.md").read_text(encoding="utf-8")
+    text = template.replace("{{generated}}", render_frontmatter(cfg, agent_id))
+    text = re.sub(r"\{\{agent:([\w-]+)\}\}", lambda m: q(agent_name(cfg, m.group(1))), text)
+    text = text.replace("{{skills}}", render_skill_refs(cfg, agent_id))
+    text = text.replace("{{capabilities}}", render_capabilities(cfg, agent_id))
+    text = text.replace("{{plugin}}", cfg.plugin_name)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.rstrip() + "\n"
+
+
+# ---------- other plugin files ----------
+
+def skill_files(cfg: Config) -> dict[str, dict[str, bytes]]:
+    skills: dict[str, dict[str, bytes]] = {}
+    for group in ("vendor", "team"):
+        base = cfg.sources / "skills" / group
+        if not base.exists():
+            continue
+        for skill_dir in sorted(p for p in base.iterdir() if p.is_dir()):
+            skills[skill_dir.name] = {
+                f.relative_to(skill_dir).as_posix(): f.read_bytes()
+                for f in sorted(skill_dir.rglob("*")) if f.is_file() and "__pycache__" not in f.parts
+            }
+    return skills
+
+
+def hook_config(cfg: Config) -> dict:
+    return {
+        "plugin": cfg.plugin_name,
+        "version": cfg.plugin.get("version", "0.0.0"),
+        "stages": cfg.stage_ids,
+        "artifacts": {s["id"]: s.get("artifacts", []) for s in cfg.stages},
+        "budgets": cfg.raw.get("budgets", {}),
+        "review": cfg.raw.get("review", {}),
+        "hooks": cfg.raw.get("hooks", {}),
+        "runs": cfg.raw.get("runs", {"commit": False}),
+        "code_index": cfg.code_index,
+        "allowed_paths": {"default": [".changes/"]},
+    }
+
+
+def server_entry(server: dict) -> dict:
+    skip = {"est_tools", "tools", "stages", "enabled", "optional"}
+    return {k: v for k, v in server.items() if k not in skip}
+
+
+def mcp_config(cfg: Config) -> dict:
+    servers = {name: server_entry(s) for name, s in cfg.servers.items() if cfg.server_usable(name)}
+    return {"$schema": MCP_SCHEMA, "mcpServers": servers}
+
+
+def plugin_manifest(cfg: Config) -> dict:
+    p = cfg.plugin
+    manifest = {
+        "$schema": PLUGIN_SCHEMA,
+        "name": cfg.plugin_name,
+        "version": p.get("version", "0.0.0"),
+        "description": p.get("description", ""),
+    }
+    for key in ("repository", "license", "homepage"):
+        if p.get(key):
+            manifest[key] = p[key]
+    manifest["keywords"] = ["copilot", "workflow", "review", "mcp"]
+    return manifest
+
+
+def marketplace(cfg: Config) -> dict:
+    p = cfg.plugin
+    return {
+        "name": cfg.plugin_name,
+        "metadata": {"description": p.get("description", ""), "version": p.get("version", "0.0.0")},
+        "owner": {"name": p.get("owner", cfg.plugin_name)},
+        "plugins": [{
+            "name": cfg.plugin_name,
+            "source": PLUGIN_DIR,
+            "description": p.get("description", ""),
+            "version": p.get("version", "0.0.0"),
+        }],
+    }
+
+
+def as_json(data: dict) -> bytes:
+    return (json.dumps(data, indent=2, ensure_ascii=False) + "\n").encode()
+
+
+def desired(cfg: Config) -> dict[str, bytes]:
+    files: dict[str, bytes] = {}
+    for agent_id in cfg.agents:
+        files[f"{AGENTS_DIR}/{agent_id}.agent.md"] = render_agent(cfg, agent_id).encode()
+    for name, sfiles in skill_files(cfg).items():
+        for rel, data in sfiles.items():
+            files[f"{SKILLS_DIR}/{name}/{rel}"] = data
+    for script in sorted((cfg.sources / "scripts").glob("*.cjs")):
+        files[f"{SCRIPTS_DIR}/{script.name}"] = script.read_bytes()
+    files[f"{SCRIPTS_DIR}/config.json"] = as_json(hook_config(cfg))
+    files[f"{PLUGIN_DIR}/mcp.json"] = as_json(mcp_config(cfg))
+    files[f"{PLUGIN_DIR}/plugin.json"] = as_json(plugin_manifest(cfg))
+    files[MARKETPLACE] = as_json(marketplace(cfg))
+    return files
+
+
+@dataclass
+class BuildReport:
+    written: list[str] = field(default_factory=list)
+    removed: list[str] = field(default_factory=list)
+    skipped_servers: list[str] = field(default_factory=list)
+
+    @property
+    def changed(self) -> bool:
+        return bool(self.written or self.removed)
+
+
+def build(cfg: Config, check: bool = False) -> BuildReport:
+    report = BuildReport()
+    files = desired(cfg)
+    root = cfg.root
+    for rel, data in sorted(files.items()):
+        path = root / rel
+        if path.exists() and path.read_bytes() == data:
+            continue
+        report.written.append(rel)
+        if not check:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(data)
+            if rel.endswith(".cjs") or "/scripts/" in rel.removeprefix(SCRIPTS_DIR):
+                path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    plugin_root = root / PLUGIN_DIR
+    if plugin_root.exists():
+        for path in sorted(p for p in plugin_root.rglob("*") if p.is_file()):
+            rel = path.relative_to(root).as_posix()
+            if rel not in files:
+                report.removed.append(rel)
+                if not check:
+                    path.unlink()
+        if not check:
+            for d in sorted((p for p in plugin_root.rglob("*") if p.is_dir()), key=lambda p: len(p.parts), reverse=True):
+                if not any(d.iterdir()):
+                    d.rmdir()
+    report.skipped_servers = sorted(n for n in cfg.servers if not cfg.server_usable(n))
+    return report

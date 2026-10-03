@@ -1,0 +1,98 @@
+{
+  "plugin": "change-harness",
+  "version": "0.2.0",
+  "stages": [
+    "intake",
+    "grill",
+    "impact",
+    "plan",
+    "implement",
+    "verify"
+  ],
+  "artifacts": {
+    "intake": [
+      "requirement.md"
+    ],
+    "grill": [
+      "clarifications.md"
+    ],
+    "impact": [
+      "impact.md",
+      "impact.json"
+    ],
+    "plan": [
+      "plan.md"
+    ],
+    "implement": [
+      "progress.md"
+    ],
+    "verify": [
+      "verification.md"
+    ]
+  },
+  "budgets": {
+    "orchestrator": {
+      "tool_calls": 30
+    },
+    "check": {
+      "tool_calls": 20
+    },
+    "intake": {
+      "tool_calls": 20
+    },
+    "grill": {
+      "tool_calls": 40
+    },
+    "impact": {
+      "tool_calls": 80,
+      "output_kb": 200
+    },
+    "scout": {
+      "tool_calls": 25
+    },
+    "plan": {
+      "tool_calls": 40
+    },
+    "implement": {
+      "tool_calls": 300,
+      "output_kb": 600
+    },
+    "implement-task": {
+      "tool_calls": 30
+    },
+    "verify": {
+      "tool_calls": 40
+    }
+  },
+  "review": {
+    "intake": "required",
+    "grill": "required",
+    "impact": "required",
+    "plan": "required",
+    "implement": "per-task",
+    "verify": "required"
+  },
+  "hooks": {
+    "audit": false,
+    "edit_tools": "(edit|create|write|replace|insert|patch|delete|rename|move)",
+    "terminal_tools": "(terminal|runInTerminal|run_in_terminal|execute|command)",
+    "subagent_tools": "(subagent|runSubagent)",
+    "out_of_plan_files": "ask"
+  },
+  "runs": {
+    "commit": false
+  },
+  "code_index": {
+    "dir": ".codegraph",
+    "file": "codegraph.db",
+    "sync": "npx -y @colbymchenry/codegraph@1.6.1 sync --quiet",
+    "seed_dir": ".codegraph-seed",
+    "seed_refresh": "stale",
+    "seed_max_age_days": 7
+  },
+  "allowed_paths": {
+    "default": [
+      ".changes/"
+    ]
+  }
+}

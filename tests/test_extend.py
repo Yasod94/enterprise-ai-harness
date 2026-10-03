@@ -2,26 +2,31 @@ import pytest
 import yaml
 
 from change_harness.cli import main
-from change_harness.extend import ExtendError, add_server, insert_entry, parse_github
+from change_harness.config import load
+from change_harness.extend import ExtendError, add_server, add_skill, insert_entry, parse_github, rebind_capability
 
 
 def test_insert_entry_keeps_comments():
     text = "# top\nskills: []\n#  - name: example\nservers: {}\n"
     out = insert_entry(text, "skills", "  - name: a\n")
     assert out.startswith("# top\nskills:\n  - name: a\n#  - name: example")
-    assert yaml.safe_load(out)["skills"] == [{"name": "a"}]
-    out2 = insert_entry(out, "skills", "  - name: b\n")
-    assert [s["name"] for s in yaml.safe_load(out2)["skills"]] == ["b", "a"]
-
-
-def test_insert_entry_adds_missing_key():
-    out = insert_entry("review: {}\n", "servers", "  x:\n    type: http\n")
-    assert yaml.safe_load(out)["servers"] == {"x": {"type": "http"}}
+    assert [s["name"] for s in yaml.safe_load(insert_entry(out, "skills", "  - name: b\n"))["skills"]] == ["b", "a"]
 
 
 def test_insert_entry_refuses_inline_values():
     with pytest.raises(ExtendError):
         insert_entry("skills: [a]\n", "skills", "  - name: b\n")
+
+
+def test_rebind_capability_only_touches_that_capability():
+    text = ("capabilities:\n  code.graph:\n    bind: codegraph   # note\n    fallback: x\n"
+            "  db.schema:\n    bind: orders-db-ro\nstages: []\n")
+    out = rebind_capability(text, "db.schema", "inv-db")
+    data = yaml.safe_load(out)
+    assert data["capabilities"]["db.schema"]["bind"] == "inv-db"
+    assert data["capabilities"]["code.graph"]["bind"] == "codegraph" and "# note" in out
+    with pytest.raises(ExtendError):
+        rebind_capability(text, "missing.cap", "x")
 
 
 def test_parse_github_forms():
@@ -30,36 +35,35 @@ def test_parse_github_forms():
     assert parse_github("https://github.com/obra/superpowers.git") == ("obra", "superpowers", None)
 
 
-def test_add_server_cli_renders_tools_into_stage_agents(initialized):
-    ext_file = initialized / ".harness/extensions.yaml"
-    ext_file.write_text("# Extra MCP servers live here\n" + ext_file.read_text())
-    code = main(["add", "server", "splunk", "--repo", str(initialized), "--url", "https://splunk.example/mcp",
-                 "--stages", "impact", "--tools", "search_logs"])
+def test_add_server_with_stages_and_capability(harness):
+    code = main(["--root", str(harness), "add", "server", "inv-db", "--command", "inv-mcp", "--stages", "impact",
+                 "--tools", "describe_table", "--capability", "db.schema"])
     assert code == 0
-    ext = (initialized / ".harness/extensions.yaml").read_text()
-    assert "# Extra MCP servers" in ext  # comments survive
-    assert yaml.safe_load(ext)["servers"]["splunk"]["tools"] == ["search_logs"]
-    for agent in ("impact-analyst", "component-scout"):
-        text = (initialized / f".github/agents/{agent}.agent.md").read_text()
-        assert "splunk/search_logs" in text
-    assert "splunk" not in (initialized / ".github/agents/planner.agent.md").read_text()
-
-
-def test_add_server_rejects_duplicates_and_missing_target(initialized):
-    add_server(initialized, "x", url="https://x.example/mcp", stages=["plan"])
+    raw = (harness / "harness.yaml").read_text()
+    assert "# Team configuration for the change-harness" in raw  # comments survive
+    cfg = load(harness)
+    assert cfg.servers["inv-db"]["tools"] == ["describe_table"]
+    assert cfg.capabilities["db.schema"]["bind"] == "inv-db"
+    scout = (harness / "plugin/com.github.copilot/agents/component-scout.agent.md").read_text()
+    assert "inv-db/describe_table" in scout
     with pytest.raises(ExtendError):
-        add_server(initialized, "x", url="https://x.example/mcp")
+        add_server(cfg, "inv-db", url="https://x.example/mcp")
     with pytest.raises(ExtendError):
-        add_server(initialized, "y")
+        add_server(cfg, "y")
 
 
-def test_add_local_skill_with_stage(initialized):
-    src = initialized / "skills-src/event-contracts"
-    src.mkdir(parents=True)
+def test_add_local_skill_with_stages(harness, tmp_path):
+    src = tmp_path / "event-contracts"
+    src.mkdir()
     (src / "SKILL.md").write_text("---\nname: event-contracts\ndescription: event contract rules\n---\nrules\n")
-    code = main(["add", "skill", "skills-src/event-contracts", "--repo", str(initialized), "--stages", "plan,verify"])
+    code = main(["--root", str(harness), "add", "skill", str(src), "--stages", "plan,verify"])
     assert code == 0
-    assert (initialized / ".github/skills/event-contracts/SKILL.md").exists()
+    assert (harness / "sources/skills/team/event-contracts/SKILL.md").exists()
+    assert (harness / "plugin/skills/event-contracts/SKILL.md").exists()
     for agent in ("planner", "reviewer"):
-        assert "(../skills/event-contracts/SKILL.md)" in (initialized / f".github/agents/{agent}.agent.md").read_text()
-    assert main(["add", "skill", "skills-src/event-contracts", "--repo", str(initialized)]) == 2
+        text = (harness / f"plugin/com.github.copilot/agents/{agent}.agent.md").read_text()
+        assert "(../../skills/event-contracts/SKILL.md)" in text
+    with pytest.raises(ExtendError):
+        add_skill(load(harness), str(src))
+    with pytest.raises(ExtendError):
+        add_skill(load(harness), str(tmp_path / "nope-not-github"), stages=["bogus"])

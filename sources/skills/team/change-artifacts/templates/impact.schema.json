@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "impact.json",
+  "type": "object",
+  "required": ["run", "components"],
+  "properties": {
+    "run": { "type": "string" },
+    "components": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "change_type", "confidence", "files", "evidence"],
+        "properties": {
+          "name": { "type": "string" },
+          "repo": { "type": "string" },
+          "change_type": { "enum": ["code", "schema", "event_contract", "config", "api", "docs"] },
+          "confidence": { "enum": ["high", "medium", "low"] },
+          "files": { "type": "array", "items": { "type": "string" } },
+          "symbols": { "type": "array", "items": { "type": "string" } },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["capability", "query"],
+              "properties": {
+                "capability": { "type": "string" },
+                "query": { "type": "string" },
+                "finding": { "type": "string" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "not_impacted": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "reason"],
+        "properties": { "name": { "type": "string" }, "reason": { "type": "string" } }
+      }
+    }
+  }
+}
