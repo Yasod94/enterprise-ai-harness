@@ -115,6 +115,52 @@ def test_code_changing_commands_ask_before_plan_stages(harness, service):
     assert decision(out) == "deny" and "not approved" in reason(out)
 
 
+READ_ONLY_COMMANDS = [
+    'grep -n "a > b" src/OrderPublisher.java',
+    "ls src 2>/dev/null",
+    "npm test 2>&1 | tail -20",
+    "git log --format='%h > %s' -5",
+    'rg "publish" src > /dev/null && echo found',
+    "gh pr view 12 --json body --jq '.body | length > 0'",
+    "Get-ChildItem src > $null",
+    "git diff --stat",
+]
+
+WRITING_COMMANDS = [
+    'bash -c "echo x > src/OrderPublisher.java"',
+    "python3 -c \"open('src/OrderPublisher.java','w').write('x')\"",
+    "find src -name '*.orig' -delete",
+    "rm -rf build",
+    "echo x > .ai-harness/ABC-123/notes.md && echo y > src/A.java",
+]
+
+
+@pytest.mark.parametrize("command", READ_ONLY_COMMANDS)
+def test_read_only_commands_run_without_asking(harness, service, command):
+    start_run(service)
+    for scope in ("grill", "impact", "verify"):
+        assert pre(harness, service, scope, "run_in_terminal", {"command": command}) is None, (scope, command)
+
+
+@pytest.mark.parametrize("command", WRITING_COMMANDS)
+def test_writing_commands_still_ask(harness, service, command):
+    start_run(service)
+    assert decision(pre(harness, service, "impact", "run_in_terminal", {"command": command})) == "ask", command
+
+
+def test_sandbox_code_is_not_unquoted(harness, service):
+    start_run(service)
+    out = pre(harness, service, "impact", "mcp_ctx_ctx_execute",
+              {"language": "python", "code": 'open("src/OrderPublisher.java", "w").write("x")'})
+    assert decision(out) == "ask"
+    out = pre(harness, service, "impact", "mcp_ctx_ctx_execute",
+              {"language": "shell", "code": 'grep -c "a > b" src/OrderPublisher.java'})
+    assert out is None
+    out = pre(harness, service, "verify", "run_in_terminal",
+              {"command": "jq '.stage = \"done\"' .ai-harness/ABC-123/state.json > t && mv t .ai-harness/ABC-123/state.json"})
+    assert decision(out) == "deny"
+
+
 # ---------- missing, broken and switched runs ----------
 
 def test_broken_state_blocks_instead_of_switching_off(harness, service):

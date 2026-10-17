@@ -32,7 +32,9 @@ const SUBSCOPES = { orchestrator: ['check'], grill: ['scout'], impact: ['scout']
 const CASE_INSENSITIVE = process.platform === 'win32' || process.platform === 'darwin';
 const PATH_KEY = /^(file_?path|path|paths|files?|uri|uris|target_?file|filename|old_?path|new_?path|dir_?path|directory_?path|destination|source_?path)$/i;
 const HOOK_OWNED = new Set(['state.json', 'approval.json', '.usage.json']);
-const WRITEISH = /(^|[^<>&|0-9])>{1,2}(?!&)|\btee\b|\bsed\s+(-[a-z]*i|--in-place)|\bperl\s+-[a-z]*i|\b(mv|cp|rm|rmdir|truncate|touch|dd|install|ln)\s|\b(Set-Content|Add-Content|Out-File|New-Item|Remove-Item|Move-Item|Copy-Item|Rename-Item)\b|writeFile|\.write\(|open\([^)]*['"][wa]/i;
+const WRITEISH = /(^|[^<>&|0-9])>{1,2}(?!&)|\btee\b|\bsed\s+(-[a-z]*i|--in-place)|\bperl\s+-[a-z]*i|\b(mv|cp|rm|rmdir|truncate|touch|dd|install|ln)\s|\b(Set-Content|Add-Content|Out-File|New-Item|Remove-Item|Move-Item|Copy-Item|Rename-Item)\b|\s-delete\b|writeFile|\.write\(|open\([^)]*['"][wa]/i;
+// Commands whose quoted text is code, not shell words: keep the quotes when testing them.
+const INTERPRETER = /\b(sh|bash|zsh|dash|fish|cmd|node|deno|bun|python[\d.]*|perl|ruby|php|pwsh|powershell|eval|awk|gawk)\b/i;
 const GIT_TREE_CHANGE = /\bgit\s+(apply|am|cherry-pick|merge|rebase|reset\s+--hard|restore|checkout\s+(--|\S+\s+--)|stash\s+(pop|apply)|pull|clean)\b/i;
 
 // ---------- small utilities ----------
@@ -244,6 +246,28 @@ function commandText(input) {
     if (Array.isArray(input[k])) return input[k].join('\n');
   }
   return JSON.stringify(input);
+}
+
+// Does a terminal or sandbox command look like it writes files? Quoted text in a plain shell
+// command is data ("grep 'a > b'"), and redirects to the null device write nothing.
+function writesFiles(input) {
+  const text = commandText(input);
+  const lang = String((input && typeof input === 'object' && input.language) || 'shell').toLowerCase();
+  let t = text;
+  if (/^(shell|bash|sh|zsh|powershell|pwsh|cmd)$/.test(lang) && !INTERPRETER.test(text)) {
+    t = t.replace(/'[^']*'|"(?:[^"\\]|\\.)*"/g, '""');
+  }
+  t = t.replace(/[\d&]?>{1,2}\s*(\/dev\/null|\$null|NUL)\b|\d>&\d/gi, ' ');
+  return WRITEISH.test(t);
+}
+
+// True when every path a command names is inside the runs folder.
+function onlyRunPaths(cfg, text) {
+  const rq = cfg.runs.dir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const runPath = new RegExp(`(^|[\\s'"=])\\.?[\\\\/]?${rq}([\\\\/][^\\s'"|;&<>]*)?`, 'g');
+  if (!runPath.test(text)) return false;
+  const rest = text.replace(runPath, '$1');
+  return !/(^|[\s'"=])(?!-)[^\s'"|;&<>]*([\/\\*]|\.[A-Za-z0-9]{1,8}\b)/.test(rest);
 }
 
 // ---------- output helpers ----------
@@ -793,7 +817,7 @@ function preTool(cfg, root, scope, event) {
     const rq = cfg.runs.dir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const touchesOwned = new RegExp(`${rq}[\\\\/][^\\s'"]*(state\\.json|approval\\.json|\\.usage\\.json|-check\\.md|\\.sessions\\.json|current)`
       + '|\\.codegraph-seed|harness\\.local\\.yaml', 'i').test(text);
-    if (touchesOwned && WRITEISH.test(text)) {
+    if (touchesOwned && writesFiles(input)) {
       return decide('deny', 'This command writes files the harness hook owns (run state, approvals, checks, the code graph seed or personal settings).');
     }
   }
@@ -891,8 +915,8 @@ function preTool(cfg, root, scope, event) {
     if (IMPLEMENT.has(scope)) {
       const pa = planApproval(cfg, run);
       if (!pa.ok) return decide('deny', pa.reason);
-    } else if ((PRE_IMPLEMENT.has(scope) || scope === 'verify') && (WRITEISH.test(text) || GIT_TREE_CHANGE.test(text))) {
-      const onlyRuns = !/(^|\s)(?!-)[\w./\\-]*[\w-]\.[A-Za-z]{1,6}\b/.test(text.replace(new RegExp(`${cfg.runs.dir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[\\\\/]\\S*`, 'g'), ''));
+    } else if ((PRE_IMPLEMENT.has(scope) || scope === 'verify') && (writesFiles(input) || GIT_TREE_CHANGE.test(text))) {
+      const onlyRuns = onlyRunPaths(cfg, text);
       if (!onlyRuns || GIT_TREE_CHANGE.test(text)) {
         return decide('ask', `This command may change files outside ${cfg.runs.dir}/, and the ${scope} stage does not change code. `
           + 'Allow it only if it does not modify source files.');
