@@ -304,3 +304,181 @@ def test_pre_compact_keeps_approved_artifacts_unchanged(harness, service):
     (run / "verification.md").write_text("v\n")
     code, _, err = prompt(harness, service, "verify", "[harness:approve verify]")
     assert code == 0, err
+
+
+# ---------- second review: roots, task history, commands, stop and resume, locks ----------
+
+def test_monorepo_subfolder_is_the_root(harness, tmp_path):
+    from conftest import git
+    top = tmp_path / "mono"
+    svc = top / "services/orders"
+    (svc / "src").mkdir(parents=True)
+    (svc / "src/A.java").write_text("class A {}\n")
+    git(top, "init", "-q")
+    code, out, err = prompt(harness, svc, "orchestrator", "ABC-1")
+    assert code == 0, err
+    state = svc / ".ai-harness/ABC-1/state.json"
+    out = pre(harness, svc, "orchestrator", "create_file", {"filePath": str(state), "content": "{}"})
+    assert out is None, reason(out)
+    run = start_run(svc, "ABC-1")
+    (run / "requirement.md").write_text("r\n")
+    code, _, err = prompt(harness, svc, "intake", "[harness:approve intake]")
+    assert code == 0, err
+    assert not (top / ".ai-harness").exists()
+    exclude = (top / ".git/info/exclude").read_text()
+    assert "/services/orders/.ai-harness/" in exclude
+    assert ".ai-harness" not in git(top, "status", "--porcelain", "--untracked-files=all")
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="symlinks need admin rights on Windows")
+def test_folder_opened_through_a_symlink(harness, service, tmp_path):
+    link = tmp_path / "link"
+    link.symlink_to(service, target_is_directory=True)
+    start_run(service)
+    out = pre(harness, link, "intake", "create_file",
+              {"filePath": str(service / ".ai-harness/ABC-123/requirement.md"), "content": "r"})
+    assert out is None, reason(out)
+    out = pre(harness, link, "intake", "create_file", {"filePath": str(service / "src/OrderPublisher.java"), "content": "x"})
+    assert decision(out) == "deny"
+
+
+def test_back_to_implement_keeps_task_history(harness, service):
+    run = start_run(service)
+    approve_until(harness, service, run, "implement")
+    for task in ("T1", "T2"):
+        out = pre(harness, service, "implement", "runSubagent",
+                  {"agentName": "Task Runner (standard)", "prompt": f"{task}: go", "description": task})
+        assert out is None, reason(out)
+        if task == "T1":
+            assert prompt(harness, service, "implement", "[harness:approve task]")[0] == 0
+    assert prompt(harness, service, "implement", "[harness:approve implement]")[0] == 0
+    (run / "verification.md").write_text("v\n")
+    code, _, err = prompt(harness, service, "verify", "[harness:revise implement] fix the log line")
+    assert code == 0, err
+    assert state(run)["tasks_dispatched"] == ["T1", "T2"]
+    out = pre(harness, service, "implement", "runSubagent",
+              {"agentName": "Task Runner (standard)", "prompt": "T2: fix the log line", "description": "T2"})
+    assert out is None, reason(out)
+    code, _, err = prompt(harness, service, "implement", "[harness:approve implement]")
+    assert code == 0, err
+    # Revising the plan does start the tasks over.
+    code, _, err = prompt(harness, service, "verify", "[harness:revise plan] split T2")
+    assert code == 0, err
+    assert "tasks_dispatched" not in state(run)
+
+
+def test_task_id_comes_from_the_start_of_the_prompt(harness, service):
+    run = start_run(service)
+    approve_until(harness, service, run, "implement")
+    out = pre(harness, service, "implement", "runSubagent",
+              {"agentName": "Task Runner (standard)", "prompt": "Context: depends on T1. Now implement T2.", "description": "x"})
+    assert decision(out) == "deny" and "Start the Task Runner prompt" in reason(out)
+    code, _, err = prompt(harness, service, "implement", "[harness:approve task]")
+    assert code == 2 and "No task is waiting" in err
+    out = pre(harness, service, "implement", "runSubagent",
+              {"agentName": "Task Runner (standard)", "prompt": "**T1**: config", "description": "T1"})
+    assert out is None, reason(out)
+    assert decision(pre(harness, service, "implement", "runSubagent",
+                        {"agentName": "Task Runner (standard)", "prompt": "T2: retry", "description": "T2"})) == "deny"
+
+
+@pytest.mark.parametrize("command", [
+    "rm -rf src", "sed -i 's/a/b/' src/*", "mv src old", "echo x > Makefile", "echo x 1> src/A.java",
+    "make &> src/out.txt", "cp -r /tmp/x src", "python3 -c \"import pathlib; pathlib.Path('src/A.java').write_text('x')\"",
+    "node -e \"require('fs').appendFileSync('src/A.java', 'x')\"",
+])
+def test_more_writing_commands_ask(harness, service, command):
+    start_run(service)
+    for scope in ("verify", "grill", "orchestrator"):
+        assert decision(pre(harness, service, scope, "run_in_terminal", {"command": command})) == "ask", (scope, command)
+
+
+@pytest.mark.parametrize("command", [
+    "java -cp target/classes Main", "docker run --rm img", "cat src/A.java | grep -c '=>'",
+    "gh pr create --title 'ABC-1: x' --body 'T1 -> done, see OrderPublisher.java'",
+    "mvn -q test > /tmp/test.log; tail -50 /tmp/test.log",
+    "mkdir -p .ai-harness/ABC-2 && echo ABC-2 > .ai-harness/current",
+])
+def test_more_harmless_commands_run(harness, service, command):
+    start_run(service)
+    scope = "orchestrator" if "current" in command else "verify"
+    assert pre(harness, service, scope, "run_in_terminal", {"command": command}) is None, command
+
+
+def test_owned_files_and_index_are_refused_to_commands_everywhere(harness, service):
+    run = start_run(service)
+    approve_until(harness, service, run, "implement")
+    for scope in ("implement-task", "verify", "orchestrator"):
+        for command in ("echo {} 1> .ai-harness/ABC-123/state.json", "rm -rf .codegraph", "echo x &> harness.local.yaml",
+                        "echo ABC-9 > .ai-harness/current"):
+            out = pre(harness, service, scope, "run_in_terminal", {"command": command})
+            if scope == "orchestrator" and command.endswith("current"):
+                continue
+            assert decision(out) == "deny", (scope, command)
+    batch = {"commands": [{"label": "x", "command": "echo x > src/A.java"}]}
+    assert decision(pre(harness, service, "impact", "mcp_ctx_ctx_batch_execute", batch)) == "ask"
+
+
+def test_no_run_terminal_and_unknown_edits(harness, service):
+    assert decision(pre(harness, service, "orchestrator", "run_in_terminal", {"command": "rm -rf src"})) == "ask"
+    out = pre(harness, service, "implement-task", "edit_notebook_file", {"cellId": "1", "newCode": "x"})
+    assert decision(out) == "deny"
+
+
+def test_stop_and_resume_follow_the_named_run(harness, service):
+    a = start_run(service, "A-1")
+    prompt(harness, service, "intake", "hello", session_id="S1")  # S1 works on A-1
+    b = start_run(service, "B-2")
+    prompt(harness, service, "intake", "hello", session_id="S2")  # S2 works on B-2
+    code, ctx, err = prompt(harness, service, "orchestrator", "[harness:stop] stop", session_id="S1")
+    assert code == 0, err
+    assert state(a)["stage_status"] == "paused" and state(b).get("stage_status") != "paused"
+    code, out, err = prompt(harness, service, "orchestrator", "resume A-1", session_id="S3")
+    assert code == 0, err
+    assert state(a)["stage_status"] == "working"
+    assert (service / ".ai-harness/current").read_text().strip() == "A-1"
+    assert "Resumed run A-1" in out["hookSpecificOutput"]["additionalContext"]
+
+
+def test_damaged_sessions_file_does_not_break_prompts(harness, service):
+    start_run(service)
+    for text in ('{"S1": null, "S2": {"run": 5}}', "[1, 2]", "not json"):
+        (service / ".ai-harness/.sessions.json").write_text(text)
+        code, out, err = prompt(harness, service, "intake", "hi", session_id="S1")
+        assert code == 0 and "Harness status" in out["hookSpecificOutput"]["additionalContext"], (text, err)
+
+
+def test_lock_left_by_a_dead_hook_is_taken_over_at_once(harness, service):
+    import time
+    start_run(service)
+    lock = service / ".ai-harness/.lock"
+    lock.write_text("999999\n" + __import__("socket").gethostname() + "\n")
+    old = time.time() - 1
+    __import__("os").utime(lock, (old, old))
+    started = time.time()
+    assert pre(harness, service, "intake", "read_file", {"filePath": "src/OrderPublisher.java"}) is None
+    assert time.time() - started < 2.5
+    assert not lock.exists()
+    lock.mkdir()  # not a file: wait, then go on without the lock
+    started = time.time()
+    code, _, err = run_hook(harness, service, "pre-tool", "intake", {"tool_name": "read_file", "tool_input": {}})
+    assert code == 0, err
+    assert time.time() - started < 10
+    lock.rmdir()
+
+
+def test_no_runs_folder_outside_git(harness, tmp_path):
+    folder = tmp_path / "plain"
+    folder.mkdir()
+    code, _, err = prompt(harness, folder, "orchestrator", "hello")
+    assert code == 0, err
+    pre(harness, folder, "intake", "read_file", {"filePath": "x"})
+    assert not (folder / ".ai-harness").exists()
+
+
+def test_harness_check_tool_calls_refresh_the_hook_marker(harness, service):
+    prompt(harness, service, "orchestrator", "hello")
+    marker = service / ".ai-harness/.hooks-ok"
+    marker.write_text("2000-01-01T00:00:00.000Z\n")
+    pre(harness, service, "check", "run_in_terminal", {"command": "node -e \"console.log(1)\""})
+    assert marker.read_text().startswith("20") and not marker.read_text().startswith("2000")

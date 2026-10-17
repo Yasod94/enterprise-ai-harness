@@ -10,7 +10,7 @@ version: 1
 
 plugin:
   name: enterprise-ai-harness
-  version: 0.4.0
+  version: 0.4.1
   description: Copilot change workflow with a review after every stage, approval-gated code edits and swappable MCP tools.
   repository: https://github.com/Yasod94/enterprise-ai-harness
   owner: Yasod94

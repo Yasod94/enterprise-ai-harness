@@ -32,7 +32,11 @@ const SUBSCOPES = { orchestrator: ['check'], grill: ['scout'], impact: ['scout']
 const CASE_INSENSITIVE = process.platform === 'win32' || process.platform === 'darwin';
 const PATH_KEY = /^(file_?path|path|paths|files?|uri|uris|target_?file|filename|old_?path|new_?path|dir_?path|directory_?path|destination|source_?path)$/i;
 const HOOK_OWNED = new Set(['state.json', 'approval.json', '.usage.json']);
-const WRITEISH = /(^|[^<>&|0-9])>{1,2}(?!&)|\btee\b|\bsed\s+(-[a-z]*i|--in-place)|\bperl\s+-[a-z]*i|\b(mv|cp|rm|rmdir|truncate|touch|dd|install|ln)\s|\b(Set-Content|Add-Content|Out-File|New-Item|Remove-Item|Move-Item|Copy-Item|Rename-Item)\b|\s-delete\b|writeFile|\.write\(|open\([^)]*['"][wa]/i;
+// Output redirection, checked after fd duplication (2>&1) and null-device targets are removed:
+// any other ">" except an arrow ("->", "=>") writes a file, with or without an fd number or "&".
+const REDIRECT = /(^|[^-=<>])>/;
+const WRITEISH = /(?<![-\w.])(tee\b|sed\s+(-[a-z]*i|--in-place)|perl\s+-[a-z]*i|(mv|cp|rm|rmdir|truncate|touch|dd|install|ln|unzip|tar\s+-?x\w*)\s)|\b(Set-Content|Add-Content|Out-File|New-Item|Remove-Item|Move-Item|Copy-Item|Rename-Item|Clear-Content)\b|\s-delete\b|\b(write|append|copy)File(Sync)?\b|\b(unlink|rename|rmSync|rmdirSync|truncate)(Sync)?\(|\.write(_text|_bytes|lines)?\(|\bos\.(remove|unlink|rename|replace|rmdir|removedirs)\(|\bshutil\.\w+\(|\.(unlink|rename|touch|rmdir)\(|open\([^)]*['"][wax+]/i;
+const CMD_KEYS = ['command', 'cmd', 'code', 'script', 'commands'];
 // Commands whose quoted text is code, not shell words: keep the quotes when testing them.
 const INTERPRETER = /\b(sh|bash|zsh|dash|fish|cmd|node|deno|bun|python[\d.]*|perl|ruby|php|pwsh|powershell|eval|awk|gawk)\b/i;
 const GIT_TREE_CHANGE = /\bgit\s+(apply|am|cherry-pick|merge|rebase|reset\s+--hard|restore|checkout\s+(--|\S+\s+--)|stash\s+(pop|apply)|pull|clean)\b/i;
@@ -169,27 +173,41 @@ function loadConfig(root) {
 // committed file: .git/info/exclude is local to the clone.
 function ensureLocalExcludes(root, cfg) {
   let rel;
+  let prefix = '';
   try {
-    rel = cp.execFileSync('git', ['rev-parse', '--git-path', 'info/exclude'], { cwd: root, timeout: 3000,
-      stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true }).toString().trim();
-  } catch { return; }
-  if (!rel) return;
+    const out = cp.execFileSync('git', ['rev-parse', '--git-path', 'info/exclude', '--show-prefix'], { cwd: root, timeout: 3000,
+      stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true }).toString().split(/\r?\n/);
+    rel = (out[0] || '').trim();
+    prefix = (out[1] || '').trim();
+  } catch { return false; }
+  if (!rel) return false;
   const file = path.isAbsolute(rel) ? rel : path.join(root, rel);
+  // In a monorepo opened at a subfolder, exclude patterns are anchored at that subfolder.
+  const at = (p) => (prefix ? `/${prefix.replace(/\/?$/, '/')}${p}` : p);
   const r = cfg.runs.dir;
-  const wanted = cfg.runs.commit
+  const wanted = (cfg.runs.commit
     ? [`${r}/current`, `${r}/.hooks-ok`, `${r}/.sessions.json`, `${r}/.lock`, `${r}/.audit.log`, `${r}/*/.usage.json`, `${r}/*/*.tmp`]
-    : [`${r}/`];
+    : [`${r}/`]).map(at);
   // CodeGraph's own .codegraph/.gitignore re-includes itself; excluding the
   // directory keeps the working index entirely out of git status.
-  wanted.push(`${(cfg.code_index.dir || '.codegraph').replace(/\/+$/, '')}/`, 'harness.local.yaml');
+  wanted.push(at(`${(cfg.code_index.dir || '.codegraph').replace(/\/+$/, '')}/`), at('harness.local.yaml'));
   let text = '';
   try { text = fs.readFileSync(file, 'utf8'); } catch { /* new file */ }
   const lines = text.split(/\r?\n/);
   const missing = wanted.filter((w) => !lines.includes(w));
-  if (!missing.length) return;
+  if (!missing.length) return true;
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const header = lines.includes('# enterprise-ai-harness') ? [] : ['# enterprise-ai-harness'];
   fs.appendFileSync(file, (text && !text.endsWith('\n') ? '\n' : '') + [...header, ...missing].join('\n') + '\n');
+  return true;
+}
+
+// The Harness Check reads this to see that the hook runs: a UTC timestamp from the last call.
+function markHooksOk(runs, create) {
+  try {
+    if (create) fs.mkdirSync(runs, { recursive: true });
+    if (fs.existsSync(runs)) fs.writeFileSync(path.join(runs, '.hooks-ok'), new Date().toISOString() + '\n');
+  } catch { /* best effort */ }
 }
 
 function approverName(root) {
@@ -211,7 +229,31 @@ function rel(root, p) {
     if (/^\/[A-Za-z]:[\\/]/.test(s)) s = s.slice(1); // file:///C:/...
   }
   const abs = path.isAbsolute(s) ? s : path.join(root, s);
-  return path.relative(root, abs).split(path.sep).join('/');
+  let out = path.relative(root, abs);
+  if (out.startsWith('..') || path.isAbsolute(out)) {
+    // The same folder by another name (a symlink, or a mapped drive): compare real paths.
+    const real = realOrNearest(abs);
+    const realRoot = realOrNearest(root);
+    if (real && realRoot) {
+      const alt = path.relative(realRoot, real);
+      if (!alt.startsWith('..') && !path.isAbsolute(alt)) out = alt;
+    }
+  }
+  return out.split(path.sep).join('/');
+}
+
+// Real path of a file, or of its nearest existing parent joined with the rest (new files).
+function realOrNearest(p) {
+  let dir = p;
+  const rest = [];
+  for (let i = 0; i < 64; i++) {
+    try { return path.join(fs.realpathSync.native(dir), ...rest.reverse()); } catch { /* go up */ }
+    const parent = path.dirname(dir);
+    if (parent === dir) return null;
+    rest.push(path.basename(dir));
+    dir = parent;
+  }
+  return null;
 }
 
 // Every file path a tool call names: path-like keys at any depth (create_file,
@@ -239,35 +281,68 @@ function collectPaths(input, root) {
   return [...new Set(found)];
 }
 
+// The command text of a terminal or sandbox call: run_in_terminal's `command`, context-mode's
+// `code`, or every `command` inside a batch (`commands: [{label, command}]`).
 function commandText(input) {
   if (!input || typeof input !== 'object') return String(input || '');
-  for (const k of ['command', 'cmd', 'code', 'script', 'commands']) {
-    if (typeof input[k] === 'string') return input[k];
-    if (Array.isArray(input[k])) return input[k].join('\n');
-  }
-  return JSON.stringify(input);
+  const out = [];
+  const pick = (v, depth) => {
+    if (depth > 4 || v == null) return;
+    if (typeof v === 'string') out.push(v);
+    else if (Array.isArray(v)) v.forEach((x) => pick(x, depth + 1));
+    else if (isPlainObject(v)) for (const k of CMD_KEYS) if (k in v) pick(v[k], depth + 1);
+  };
+  for (const k of CMD_KEYS) if (k in input) pick(input[k], 0);
+  return out.length ? out.join('\n') : JSON.stringify(input);
 }
 
+function escapeRe(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+
 // Does a terminal or sandbox command look like it writes files? Quoted text in a plain shell
-// command is data ("grep 'a > b'"), and redirects to the null device write nothing.
+// command is data ("grep 'a > b'"), unless the command hands it to an interpreter
+// ("bash -c '...'", "python -c '...'"). Redirects to the null device or the temp folder write
+// nothing that matters.
 function writesFiles(input) {
   const text = commandText(input);
   const lang = String((input && typeof input === 'object' && input.language) || 'shell').toLowerCase();
+  const shell = /^(shell|bash|sh|zsh|powershell|pwsh|cmd)$/.test(lang);
   let t = text;
-  if (/^(shell|bash|sh|zsh|powershell|pwsh|cmd)$/.test(lang) && !INTERPRETER.test(text)) {
-    t = t.replace(/'[^']*'|"(?:[^"\\]|\\.)*"/g, '""');
-  }
-  t = t.replace(/[\d&]?>{1,2}\s*(\/dev\/null|\$null|NUL)\b|\d>&\d/gi, ' ');
-  return WRITEISH.test(t);
+  if (shell && !INTERPRETER.test(text)) t = t.replace(/'[^']*'|"(?:[^"\\]|\\.)*"/g, '""');
+  if (WRITEISH.test(t)) return true;
+  if (!shell) return false;
+  t = t.replace(/\d*>&(\d+|-)/g, ' ')
+    .replace(/(\d+|&)?>{1,2}\|?\s*(\/dev\/null\b|\$null\b|NUL\b|\/tmp\/[^\s;&|]*|\$\{?TMPDIR\}?[^\s;&|]*|\$env:TEMP[^\s;&|]*|%TEMP%[^\s;&|]*)/gi, ' ');
+  return REDIRECT.test(t);
 }
 
 // True when every path a command names is inside the runs folder.
 function onlyRunPaths(cfg, text) {
-  const rq = cfg.runs.dir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const runPath = new RegExp(`(^|[\\s'"=])\\.?[\\\\/]?${rq}([\\\\/][^\\s'"|;&<>]*)?`, 'g');
+  const runPath = new RegExp(`(^|[\\s'"=])\\.?[\\\\/]?${escapeRe(cfg.runs.dir)}([\\\\/][^\\s'"|;&<>]*)?`, 'g');
   if (!runPath.test(text)) return false;
   const rest = text.replace(runPath, '$1');
   return !/(^|[\s'"=])(?!-)[^\s'"|;&<>]*([\/\\*]|\.[A-Za-z0-9]{1,8}\b)/.test(rest);
+}
+
+// Hook-owned files a command names: run state, approvals, checks, sessions, the code graph
+// index and seed, personal settings. The orchestrator may write the current-run pointer.
+function namesOwnedFile(cfg, text, scope) {
+  const owned = ['state\\.json', 'approval\\.json', '\\.usage\\.json', '-check\\.md', '\\.sessions\\.json', '\\.lock', '\\.hooks-ok'];
+  if (scope !== 'orchestrator') owned.push('current\\b');
+  const dir = escapeRe((cfg.code_index.dir || '.codegraph').replace(/[\\/]+$/, ''));
+  const seed = escapeRe((cfg.code_index.seed_dir || '.codegraph-seed').replace(/[\\/]+$/, ''));
+  return new RegExp(`${escapeRe(cfg.runs.dir)}[\\\\/][^\\s'"]*(${owned.join('|')})`
+    + `|(^|[\\s'"=/\\\\])(${dir}|${seed})([\\\\/\\s'";|&)]|$)|harness\\.local\\.yaml`, 'i').test(text);
+}
+
+// The person's OK for a file-writing command outside implement, unless it only touches run files.
+function terminalAsk(cfg, scope, input) {
+  if (!(PRE_IMPLEMENT.has(scope) || scope === 'verify')) return null;
+  const text = commandText(input);
+  const treeChange = GIT_TREE_CHANGE.test(text);
+  if (!treeChange && !writesFiles(input)) return null;
+  if (!treeChange && onlyRunPaths(cfg, text)) return null;
+  return `This command may change files outside ${cfg.runs.dir}/, and the ${scope} stage does not change code. `
+    + 'Allow it only if it does not modify source files.';
 }
 
 // ---------- output helpers ----------
@@ -290,24 +365,44 @@ function blockPrompt(reason) { throw new Block(reason); }
 
 // A short exclusive lock around read-modify-write of the run files, so parallel
 // tool calls do not lose counter updates. Never blocks work: after ~3 s it proceeds.
+function pidAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try { process.kill(pid, 0); return true; } catch (err) { return err.code === 'EPERM'; }
+}
+
+// A lock is stale when its holder has exited, or after 10 s (a holder on another machine
+// sharing the folder, or a reused pid).
+function lockIsStale(lock) {
+  try {
+    const st = fs.statSync(lock);
+    if (!st.isFile()) return false;
+    if (Date.now() - st.mtimeMs > 10000) return true;
+    const [pidLine, host] = fs.readFileSync(lock, 'utf8').split(/\r?\n/);
+    if (host && host !== os.hostname()) return false;
+    // The grace period covers a holder that created the file but has not written its pid yet.
+    return Date.now() - st.mtimeMs > 200 && !pidAlive(Number(pidLine));
+  } catch { return false; }
+}
+
 function acquireLock(dir) {
+  // No runs folder means no run files to protect; do not create one just to lock it.
+  if (!fs.existsSync(dir)) return null;
   const lock = path.join(dir, '.lock');
-  try { fs.mkdirSync(dir, { recursive: true }); } catch { return null; }
   const deadline = Date.now() + 3000;
   for (;;) {
     try {
       const fd = fs.openSync(lock, 'wx');
-      fs.writeSync(fd, String(process.pid));
+      fs.writeSync(fd, `${process.pid}\n${os.hostname()}\n`);
       fs.closeSync(fd);
       return lock;
     } catch (err) {
       if (err.code !== 'EEXIST') return null;
-      try {
-        if (Date.now() - fs.statSync(lock).mtimeMs > 10000) { fs.unlinkSync(lock); continue; }
-      } catch { continue; }
-      if (Date.now() > deadline) return null;
-      sleep(15);
     }
+    if (lockIsStale(lock)) {
+      try { fs.unlinkSync(lock); continue; } catch { /* another hook took it over, or it is not a file */ }
+    }
+    if (Date.now() > deadline) return null;
+    sleep(15);
   }
 }
 
@@ -325,7 +420,14 @@ function loadRun(root, cfg) {
   let id;
   try { id = fs.readFileSync(path.join(runs, 'current'), 'utf8').replace(/^\uFEFF/, '').trim(); } catch { return { status: 'none' }; }
   if (!id) return { status: 'none' };
-  if (/[\\/]|\.\./.test(id)) return { status: 'broken', id, reason: `${cfg.runs.dir}/current names an invalid run id "${id}"` };
+  return loadRunById(root, cfg, id);
+}
+
+function validRunId(id) { return typeof id === 'string' && /^[\w][\w.-]{0,120}$/.test(id) && !id.includes('..'); }
+
+function loadRunById(root, cfg, id) {
+  const runs = runsPath(root, cfg);
+  if (!validRunId(id)) return { status: 'broken', id, reason: `${cfg.runs.dir}/current names an invalid run id "${id}"` };
   const dir = path.join(runs, id);
   const stateFile = path.join(dir, 'state.json');
   if (!fs.existsSync(stateFile)) return { status: 'broken', id, reason: `${cfg.runs.dir}/${id}/state.json is missing` };
@@ -429,18 +531,29 @@ function batchSize(cfg) {
 
 function sessionsFile(root, cfg) { return path.join(runsPath(root, cfg), '.sessions.json'); }
 
+// Valid session records only: a hand-edited or damaged file must not break every prompt.
+function readSessions(root, cfg) {
+  const raw = readJson(sessionsFile(root, cfg), {});
+  const out = {};
+  if (!isPlainObject(raw)) return out;
+  for (const [k, v] of Object.entries(raw)) {
+    if (isPlainObject(v) && typeof v.run === 'string' && v.run) out[k] = { run: v.run, at: String(v.at || '') };
+  }
+  return out;
+}
+
 function boundRun(root, cfg, sessionId) {
   if (!sessionId) return null;
-  const rec = (readJson(sessionsFile(root, cfg), {}) || {})[sessionId];
+  const rec = readSessions(root, cfg)[String(sessionId)];
   return rec ? rec.run : null;
 }
 
 function bindSession(root, cfg, sessionId, runId) {
   if (!sessionId || !runId) return;
   const file = sessionsFile(root, cfg);
-  const all = readJson(file, {}) || {};
-  all[sessionId] = { run: runId, at: new Date().toISOString() };
-  const entries = Object.entries(all).sort((a, b) => String(b[1].at).localeCompare(String(a[1].at))).slice(0, 50);
+  const all = readSessions(root, cfg);
+  all[String(sessionId)] = { run: runId, at: new Date().toISOString() };
+  const entries = Object.entries(all).sort((a, b) => b[1].at.localeCompare(a[1].at)).slice(0, 50);
   try { writeJsonAtomic(file, Object.fromEntries(entries)); } catch { /* best effort */ }
 }
 
@@ -565,7 +678,9 @@ function parsePrompt(text, scope) {
   if (/^stop\s*[.!]?$/i.test(s)) return { action: 'stop' };
   if (/^extend\s*[.!]?$/i.test(s)) return { action: 'extend' };
   if (/^(save|refresh) (the )?code ?graph\s*[.!]?$/i.test(s)) return { action: 'codegraph-save' };
-  if (/^resume\b/i.test(s) && scope === 'orchestrator') return { action: 'resume' };
+  if ((w = s.match(/^resume\b(?:\s+(?:the\s+)?(?:run\s+)?([A-Za-z0-9][\w.-]*))?/i)) && scope === 'orchestrator') {
+    return { action: 'resume', run: w[1] || null };
+  }
   return null;
 }
 
@@ -577,10 +692,29 @@ function clearLaterApprovals(cfg, run, stage, inclusive) {
     // A check of a later stage looked at artifacts built on what is being revised.
     if (i > idx && run.state.cross_checks) delete run.state.cross_checks[s];
   });
-  if (idx < impl || (inclusive && idx === impl)) {
+  // Revising implement keeps the task history, so one fix does not mean running every task again.
+  if (idx < impl) {
     delete run.state.approvals.tasks;
     delete run.state.tasks_dispatched;
+    delete run.state.tasks_pending_review;
+    delete run.state.tasks_reviewed;
   }
+}
+
+// Tasks started since the person last reviewed a task.
+function pendingReview(cfg, run) {
+  if (Array.isArray(run.state.tasks_pending_review)) return run.state.tasks_pending_review;
+  // Runs started by 0.4.0 kept only a count of reviews.
+  const batch = batchSize(cfg);
+  const dispatched = run.state.tasks_dispatched || [];
+  return Number.isFinite(batch) ? dispatched.slice((run.state.approvals.tasks || 0) * batch) : [];
+}
+
+function markReviewed(cfg, run) {
+  const pending = pendingReview(cfg, run);
+  run.state.tasks_reviewed = [...new Set([...(run.state.tasks_reviewed || []), ...pending])];
+  run.state.tasks_pending_review = [];
+  return pending;
 }
 
 function approveTasksCheck(cfg, run) {
@@ -593,19 +727,25 @@ function approveTasksCheck(cfg, run) {
       + 'Continue with the Implementer, or go back to plan to change the task list.');
   }
   const batch = batchSize(cfg);
-  const reviewed = (run.state.approvals.tasks || 0) * batch;
-  if (Number.isFinite(batch) && dispatched.length > reviewed + batch) {
-    blockPrompt(`Cannot approve implement: ${dispatched.length} tasks ran but only ${run.state.approvals.tasks || 0} task reviews `
-      + 'were recorded. Review the remaining tasks with "Approve and continue" first.');
+  const pending = pendingReview(cfg, run);
+  if (Number.isFinite(batch) && pending.length > batch) {
+    blockPrompt(`Cannot approve implement: ${pending.join(', ')} ran without a task review. `
+      + 'Review them with "Approve and continue" first.');
   }
 }
 
 function approve(cfg, run, stage, root, skip) {
   const now = new Date().toISOString();
   if (stage === 'task') {
+    // With task ids in plan.md the hook knows which task is up for review; a review banked
+    // before a task ran would let the next one skip it.
+    if (planTasks(run).size && !pendingReview(cfg, run).length) {
+      blockPrompt('No task is waiting for review. Approve a task after its Task Runner has finished and the Implementer shows its card.');
+    }
+    const reviewed = markReviewed(cfg, run);
     run.state.approvals.tasks = (run.state.approvals.tasks || 0) + 1;
     resetUsage(run, 'implement-task');
-    return `Task review ${run.state.approvals.tasks} recorded. Continue with the next task.`;
+    return `Task review ${run.state.approvals.tasks} recorded${reviewed.length ? ` (${reviewed.join(', ')})` : ''}. Continue with the next task.`;
   }
   const idx = cfg.stages.indexOf(stage);
   if (idx < 0) blockPrompt(`Unknown stage "${stage}". Stages are: ${cfg.stages.join(', ')}.`);
@@ -627,7 +767,7 @@ function approve(cfg, run, stage, root, skip) {
     const impact = path.join(run.dir, 'impact.json');
     if (fs.existsSync(impact)) files['impact.json'] = sha256(impact);
   }
-  if (stage === 'implement') approveTasksCheck(cfg, run);
+  if (stage === 'implement') { approveTasksCheck(cfg, run); markReviewed(cfg, run); }
   const by = approverName(root);
   const cc = crossCheckRecord(cfg, run, stage, files, skip, by);
   clearLaterApprovals(cfg, run, stage, false);
@@ -686,9 +826,8 @@ function onPrompt(cfg, root, scope, event) {
   const notes = [];
   const runs = runsPath(root, cfg);
   try {
-    fs.mkdirSync(runs, { recursive: true });
-    fs.writeFileSync(path.join(runs, '.hooks-ok'), new Date().toISOString() + '\n');
-    ensureLocalExcludes(root, cfg);
+    // Only git work trees get a runs folder unprompted; it is excluded from git there.
+    if (ensureLocalExcludes(root, cfg) || fs.existsSync(runs)) markHooksOk(runs, true);
   } catch { /* read-only checkout */ }
   try {
     const restored = codegraph.restore(root, cfg.code_index);
@@ -699,6 +838,19 @@ function onPrompt(cfg, root, scope, event) {
   let saveReason = cmd && cmd.action === 'codegraph-save' ? 'requested' : null;
   const lock = acquireLock(runs);
   try {
+    // "resume <run-id>" unpauses that run and makes it the active one.
+    if (cmd && cmd.action === 'resume' && cmd.run) {
+      const target = loadRunById(root, cfg, cmd.run);
+      if (target.status === 'ok') {
+        if (target.state.stage_status === 'paused') target.state.stage_status = 'working';
+        saveState(target);
+        fs.writeFileSync(path.join(runs, 'current'), `${target.id}\n`);
+        bindSession(root, cfg, event.session_id, target.id);
+        notes.push(`Resumed run ${target.id}; it is now the active run.`);
+      } else if (target.status === 'broken' && fs.existsSync(path.join(runs, String(cmd.run)))) {
+        notes.push(`Run ${cmd.run} cannot be resumed: ${target.reason}.`);
+      }
+    }
     const run = loadRun(root, cfg);
     const stateful = cmd && !['codegraph-save', 'stop', 'resume'].includes(cmd.action);
     if (run.status !== 'ok') {
@@ -735,8 +887,13 @@ function onPrompt(cfg, root, scope, event) {
         if (cmd.stage === 'verify' && codegraph.shouldRefresh(root, cfg.code_index)) saveReason = `pr ${run.id}`;
       } else if (cmd.action === 'revise') notes.push(revise(cfg, run, cmd.stage));
       else if (cmd.action === 'stop') {
-        run.state.stage_status = 'paused';
-        notes.push(`Run paused. Harness agents will not run tools until the person asks the Change Orchestrator to "resume ${run.id}".`);
+        // Stop pauses the run this chat works on, which may not be the active one.
+        const target = bound && bound !== run.id ? loadRunById(root, cfg, bound) : run;
+        if (target.status === 'ok') {
+          target.state.stage_status = 'paused';
+          if (target !== run) saveState(target);
+        }
+        notes.push(`Run ${target.id} paused. Harness agents will not run tools on it until the person asks the Change Orchestrator to "resume ${target.id}".`);
       } else if (cmd.action === 'resume') {
         if (run.state.stage_status === 'paused') run.state.stage_status = 'working';
       } else if (cmd.action === 'extend') notes.push(extend(cfg, run, scope));
@@ -799,6 +956,8 @@ function protectedPath(cfg, p, scope) {
 function onPreTool(cfg, root, scope, event) {
   audit(cfg, root, scope, event);
   const runs = runsPath(root, cfg);
+  // The Harness Check usually runs as a subagent, which gets no prompt hook of its own.
+  if (scope === 'check') markHooksOk(runs, false);
   const lock = acquireLock(runs);
   try { return preTool(cfg, root, scope, event); } finally { releaseLock(lock); }
 }
@@ -812,20 +971,20 @@ function preTool(cfg, root, scope, event) {
   const runRel = runId ? `${cfg.runs.dir}/${runId}/` : `${cfg.runs.dir}/`;
 
   // Commands that write hook-owned files are refused in every scope.
-  if (isTerminal) {
-    const text = commandText(input);
-    const rq = cfg.runs.dir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const touchesOwned = new RegExp(`${rq}[\\\\/][^\\s'"]*(state\\.json|approval\\.json|\\.usage\\.json|-check\\.md|\\.sessions\\.json|current)`
-      + '|\\.codegraph-seed|harness\\.local\\.yaml', 'i').test(text);
-    if (touchesOwned && writesFiles(input)) {
-      return decide('deny', 'This command writes files the harness hook owns (run state, approvals, checks, the code graph seed or personal settings).');
-    }
+  if (isTerminal && namesOwnedFile(cfg, commandText(input), scope) && writesFiles(input)) {
+    return decide('deny', 'This command writes files the harness hook owns (run state, approvals, checks, the code graph '
+      + 'index or seed, or personal settings).');
   }
 
   if (run.status !== 'ok') {
     // Without a usable run, harness agents may only create run files.
     if (isEdit) {
-      for (const p of collectPaths(input, root)) {
+      const paths = collectPaths(input, root);
+      if (!paths.length) {
+        if (IMPLEMENT.has(scope)) return decide('deny', 'There is no usable active run, so the plan is not approved.');
+        return decide('ask', `Could not tell which file "${tool}" edits. Without an active run, harness agents only create run files.`);
+      }
+      for (const p of paths) {
         const why = protectedPath(cfg, p, scope);
         if (why && why !== 'owned') return decide('deny', why);
         if (why === 'owned' && !(scope === 'orchestrator' && p.endsWith('state.json') && !fs.existsSync(path.join(root, p)))) {
@@ -839,6 +998,10 @@ function preTool(cfg, root, scope, event) {
       }
     }
     if (isTerminal && IMPLEMENT.has(scope)) return decide('deny', 'There is no usable active run, so the plan is not approved.');
+    if (isTerminal) {
+      const ask = terminalAsk(cfg, scope, input);
+      if (ask) return decide('ask', ask);
+    }
     return;
   }
 
@@ -911,16 +1074,12 @@ function preTool(cfg, root, scope, event) {
 
   // Terminal and sandbox commands can change files too.
   if (isTerminal) {
-    const text = commandText(input);
     if (IMPLEMENT.has(scope)) {
       const pa = planApproval(cfg, run);
       if (!pa.ok) return decide('deny', pa.reason);
-    } else if ((PRE_IMPLEMENT.has(scope) || scope === 'verify') && (writesFiles(input) || GIT_TREE_CHANGE.test(text))) {
-      const onlyRuns = onlyRunPaths(cfg, text);
-      if (!onlyRuns || GIT_TREE_CHANGE.test(text)) {
-        return decide('ask', `This command may change files outside ${cfg.runs.dir}/, and the ${scope} stage does not change code. `
-          + 'Allow it only if it does not modify source files.');
-      }
+    } else {
+      const ask = terminalAsk(cfg, scope, input);
+      if (ask) return decide('ask', ask);
     }
   }
 
@@ -930,8 +1089,10 @@ function preTool(cfg, root, scope, event) {
     const subScope = cfg.agent_scopes[name];
     if (subScope && PER_REQUEST.has(subScope)) resetUsage(run, subScope);
     if (scope === 'implement' && subScope === 'implement-task') {
-      const text = String(input.prompt || '');
-      const task = ((text.match(/^\s*\W{0,3}(T\d+)\b/i) || text.match(/\b(T\d+)\b/) || String(input.description || '').match(/\b(T\d+)\b/) || [])[1] || '').toUpperCase();
+      // The task id must start the prompt (or the description): "T3: ...". An id mentioned later
+      // ("depends on T1") is context, not the task.
+      const lead = (v) => ((String(v || '').match(/^\s*\W{0,3}(T\d+)\b/i) || [])[1] || '');
+      const task = (lead(input.prompt) || lead(input.description)).toUpperCase();
       const pa = planApproval(cfg, run);
       if (!pa.ok) return decide('deny', pa.reason);
       const tasks = planTasks(run);
@@ -939,9 +1100,9 @@ function preTool(cfg, root, scope, event) {
         if (!task) return decide('deny', 'Start the Task Runner prompt with the task id from plan.md (for example "T3: ...").');
         if (!tasks.has(task)) return decide('deny', `${task} is not a task in the approved plan.md.`);
         const dispatched = run.state.tasks_dispatched || [];
+        const pending = pendingReview(cfg, run);
         const batch = batchSize(cfg);
-        const allowed = (run.state.approvals.tasks || 0) * batch + batch;
-        if (!dispatched.includes(task) && Number.isFinite(batch) && dispatched.length >= allowed) {
+        if (!pending.includes(task) && Number.isFinite(batch) && pending.length >= batch) {
           return decide('deny', `The person has not reviewed the previous task${batch > 1 ? 's' : ''} yet. `
             + 'Stop and show the review card; the next task starts after "Approve and continue".');
         }
@@ -957,6 +1118,7 @@ function preTool(cfg, root, scope, event) {
             + `subagent above the session's model cost. Stop and show the card; the person can press "Continue on the ${runnerTier} model".`);
         }
         if (!dispatched.includes(task)) run.state.tasks_dispatched = [...dispatched, task];
+        run.state.tasks_pending_review = pending.includes(task) ? pending : [...pending, task];
         saveState(run);
       }
     }
@@ -1017,8 +1179,11 @@ function main() {
     if (raw.trim()) event = JSON.parse(raw);
   } catch { /* no stdin */ }
   if (!isPlainObject(event)) event = {};
-  const cwd = path.resolve(event.cwd || process.cwd());
-  const root = gitTop(cwd) || cwd;
+  // The opened folder is the root: agents write run files relative to it, also when it is a
+  // subfolder of a monorepo or reached through a symlink. Without a cwd, use the repo top.
+  const root = event.cwd && fs.existsSync(String(event.cwd))
+    ? path.resolve(String(event.cwd))
+    : (gitTop(process.cwd()) || process.cwd());
   const cfg = loadConfig(root);
   if (mode === 'prompt') {
     let result;
