@@ -59,11 +59,11 @@ Before you start, read and follow these skills:
 
 The person types a Jira key (like `ABC-123`) or describes a change in plain words.
 
-1. Run id: the Jira key, or `local-YYYY-MM-DD-<3-5 word slug>` for a plain request.
-2. Create `.changes/<run-id>/state.json` from the change-artifacts template. Set `source`, `request` (the person's words, for a plain request), `branch`, `created_at`, `stage: "intake"`. After this the hook owns the file.
-3. Write the run id to `.changes/current`.
+1. Run id: the Jira key, or `local-YYYY-MM-DD-<3-5 word slug>` for a plain request. If `.ai-harness/<run-id>/` already exists, do not create it again: offer `resume <run-id>` instead.
+2. Create `.ai-harness/<run-id>/state.json` from the change-artifacts template. Set `source`, `request` (the person's words, for a plain request), `branch`, `created_at`, `stage: "intake"`. After this the hook owns the file.
+3. Write the run id to `.ai-harness/current`.
 4. Create and switch to branch `change/<run-id>` with git. If the working tree has uncommitted changes, ask before switching.
-5. If `.changes/.checked` does not exist, run the Harness Check subagent once. Show its result in at most 6 lines, then write today's date to `.changes/.checked`.
+5. If `.ai-harness/.checked` does not exist, run the Harness Check subagent once. Show its result in at most 6 lines, then write today's date to `.ai-harness/.checked`.
 6. Code graph: the hook restores `.codegraph/` from the committed seed in `.codegraph-seed/` when a clone has none. If neither exists, say so and offer to build it: the Harness Check runs the code.graph setup command, then the person types `save code graph` and commits `.codegraph-seed/` so nobody else has to build it.
 7. Reply with: the run id, the branch, the six stages in one line, and "Press Start or resume intake."
 
@@ -71,18 +71,18 @@ A small change (a typo, a log line, a one-file fix) can take the short path: tel
 
 ## Commands
 
-Plain words work; match intent, not exact text.
+Commands that change the run (`back to <stage>`, `stop`, `resume <run-id>`) take effect through the hook only when the person's whole message is the command. If they ask in other words ("could we redo the plan?"), tell them the exact words to type. `status`, `help`, `models` and the add commands are yours to answer in any wording.
 
-- `status`: read `.changes/current` and its `state.json`. Show stage, its status, approvals so far, and usage against budget for the current stage. Five lines.
-- `resume <run-id>`: write it to `.changes/current`, check out its branch, show `status`, and name the button for its stage.
+- `status`: read `.ai-harness/current` and its `state.json`. Show stage, its status, approvals so far, and usage against budget for the current stage. Five lines.
+- `resume <run-id>`: write it to `.ai-harness/current`, check out its branch, show `status`, and name the button for its stage. The hook also lifts a pause on that run.
 - `back to <stage>`: the hook moves the run back and clears that stage's approval and later ones. Confirm what it reported, then name the button for that stage.
-- `stop`: say the run is saved and how to resume it.
+- `stop`: the hook pauses the run, and harness agents stop running tools until `resume <run-id>`. Say the run is saved and how to resume it.
 - `help`: list these commands and the buttons in six lines.
 - `save code graph`: the hook syncs the index and writes the seed to `.codegraph-seed/`, and reports the size. If the person asks, commit `.codegraph-seed/` on its own: "Update code graph seed".
-- `models`: explain in four lines how models are chosen. Each stage agent has a tier set by the team in the plugin; the Planner gives every task a Tier the person can change before approving the plan; the Implementer's "Continue on the <tier> model" buttons switch tiers for higher-tier tasks; a Checker on a stronger tier reviews the plan, and approving without it needs "skip cross-check", which is recorded.
+- `models`: explain in four lines how models are chosen. Each stage agent has a tier set by the team in the plugin; the Planner gives every task a Tier the person can change before approving the plan; the Implementer's "Continue on the <tier> model" buttons switch tiers for higher-tier tasks; a Checker on a stronger tier reviews the plan, and approving without it needs "Approve and skip the cross-check", which is recorded.
 - `add skill ...` or `add server ...`: explain the two routes in a few lines and do not edit files:
   - just for them: put a skill folder in `~/.copilot/skills/<name>/`; add a server to their VS Code user `mcp.json` and list its tools in a tool set named `extras-<stage>` (for example `extras-impact`), which every stage agent already includes.
   - for the whole team: a PR to the enterprise-ai-harness plugin repo, using `harness add skill` or `harness add server` there.
   A skill folder committed in this repo's `.github/skills/` also works for everyone on this repo.
 
-You may edit only files under `.changes/`.
+You may edit only files under `.ai-harness/`.

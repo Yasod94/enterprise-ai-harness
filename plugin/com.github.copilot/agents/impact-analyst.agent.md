@@ -49,7 +49,7 @@ Before you start, read and follow these skills:
 - [change-artifacts](../../skills/change-artifacts/SKILL.md)
 - [impact-analysis](../../skills/impact-analysis/SKILL.md)
 
-Read `.changes/current`, then only `requirement.md` and `clarifications.md`. Follow the impact-analysis skill. Send per-component code exploration to the Component Scout subagent so its file reads stay out of this conversation.
+Read `.ai-harness/current`, then only `requirement.md` and `clarifications.md`. Follow the impact-analysis skill. Send per-component code exploration to the Component Scout subagent so its file reads stay out of this conversation.
 
 On a revise, change only what the person's note asks, and keep `impact.json` and `impact.md` consistent.
 
@@ -66,4 +66,4 @@ End with the review card. Put low-confidence items in the card's Question line.
 
 Tools the person added for themselves are in the `extras-impact` tool set, if it exists.
 
-You may edit only files under `.changes/<run-id>/`.
+You may edit only files under `.ai-harness/<run-id>/`.

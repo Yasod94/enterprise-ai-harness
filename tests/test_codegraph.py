@@ -102,23 +102,55 @@ def test_refresh_policy(harness, service):
     assert cg(harness, service, "shouldRefresh", {"seed_refresh": "every-pr"}) is True
 
 
-def test_background_sync_skips_debounces_and_defers_to_watcher(harness, service):
-    idx = {"sync": FAKE_SYNC}
-    assert cg(harness, service, "backgroundSync", idx) == "skipped"  # no index
+def wait_for(predicate, seconds=15):
+    deadline = time.time() + seconds
+    while not predicate() and time.time() < deadline:
+        time.sleep(0.1)
+    return predicate()
+
+
+def test_background_sync_runs_one_loop_and_catches_up(harness, service):
+    slow = "echo x >> .codegraph/rounds && sleep 1"
+    assert cg(harness, service, "backgroundSync", {"sync": slow}) == "skipped"  # no index
     make_index(service)
     assert cg(harness, service, "backgroundSync", {}) == "skipped"  # no sync command
-    assert cg(harness, service, "backgroundSync", idx) == "started"
-    assert cg(harness, service, "backgroundSync", idx) == "debounced"
-    deadline = time.time() + 10
-    while not (service / ".codegraph/synced").exists() and time.time() < deadline:
-        time.sleep(0.1)
-    assert (service / ".codegraph/synced").exists()
+    assert cg(harness, service, "backgroundSync", {"sync": slow}) == "started"
+    assert wait_for(lambda: (service / ".codegraph/rounds").exists())
+    # An edit while the loop runs is queued, and the loop syncs once more before it exits.
+    assert cg(harness, service, "backgroundSync", {"sync": slow}) == "queued"
+    assert wait_for(lambda: not (service / ".codegraph/.harness-sync.pid").exists())
+    assert (service / ".codegraph/rounds").read_text().count("x") == 2
 
-    (service / ".codegraph/.harness-sync").unlink()
+
+def test_background_sync_defers_to_a_running_server(harness, service):
+    make_index(service)
     (service / ".codegraph/daemon.pid").write_text(json.dumps({"pid": os.getpid(), "version": "1.6.1"}))
-    assert cg(harness, service, "backgroundSync", idx) == "watcher"
+    assert cg(harness, service, "backgroundSync", {"sync": FAKE_SYNC}) == "watcher"
     (service / ".codegraph/daemon.pid").write_text("999999999\n")  # stale pid in the old plain format
-    assert cg(harness, service, "backgroundSync", idx) == "started"
+    assert cg(harness, service, "backgroundSync", {"sync": FAKE_SYNC}) == "started"
+    assert wait_for(lambda: (service / ".codegraph/synced").exists())
+
+
+@pytest.mark.parametrize("content,message", [
+    (b"version https://git-lfs.github.com/spec/v1\noid sha256:abc\n", "Git LFS pointer"),
+    (b"not gzip at all", "not a valid gzip file"),
+    (None, "does not contain a SQLite database"),
+])
+def test_restore_rejects_bad_seeds_once(harness, service, content, message):
+    import gzip
+    seed = service / ".codegraph-seed"
+    seed.mkdir()
+    (seed / "codegraph.db.gz").write_bytes(content if content is not None else gzip.compress(b"plain text"))
+    first = cg(harness, service, "restore")
+    assert message in first and not (service / ".codegraph/codegraph.db").exists()
+    assert cg(harness, service, "restore") is None  # reported once per seed, not on every prompt
+
+
+def test_save_leaves_no_temp_files_in_the_seed_folder(harness, service):
+    make_index(service, rows=10)
+    cg(harness, service, "save", {}, "manual")
+    assert sorted(f.name for f in (service / ".codegraph-seed").iterdir()) == ["SEED.json", "codegraph.db.gz"]
+    assert not list((service / ".codegraph").glob(".snapshot-*")) and not list((service / ".codegraph").glob(".seed-*"))
 
 
 def test_hook_restores_seed_on_first_prompt(harness, service):
@@ -138,12 +170,12 @@ def test_hook_syncs_after_code_edits_in_implement_only(harness, service):
     with_fake_sync(harness)
     make_index(service)
     start_run(service)
-    run_hook(harness, service, "post-tool", "plan", {"tool_name": "editFiles", "tool_response": "ok"})
-    assert not (service / ".codegraph/.harness-sync").exists()
-    run_hook(harness, service, "post-tool", "implement-task", {"tool_name": "readFile", "tool_response": "ok"})
-    assert not (service / ".codegraph/.harness-sync").exists()
-    run_hook(harness, service, "post-tool", "implement-task", {"tool_name": "editFiles", "tool_response": "ok"})
-    assert (service / ".codegraph/.harness-sync").exists()
+    run_hook(harness, service, "post-tool", "plan", {"tool_name": "create_file", "tool_response": "ok"})
+    assert not (service / ".codegraph/synced").exists()
+    run_hook(harness, service, "post-tool", "implement-task", {"tool_name": "read_file", "tool_response": "ok"})
+    assert not (service / ".codegraph/.harness-sync-dirty").exists()
+    run_hook(harness, service, "post-tool", "implement-task", {"tool_name": "replace_string_in_file", "tool_response": "ok"})
+    assert wait_for(lambda: (service / ".codegraph/synced").exists())
 
 
 def test_save_code_graph_command(harness, service):

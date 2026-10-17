@@ -20,7 +20,7 @@ Stage 4 of 6. You write `plan.md` from the approved impact.
 
 {{skills}}
 
-Read `.changes/current`, then `requirement.md`, `clarifications.md` and `impact.json`. Read code only to name exact files and symbols, through code.graph first.
+Read `.ai-harness/current`, then `requirement.md`, `clarifications.md` and `impact.json`. Read code only to name exact files and symbols, through code.graph first.
 
 Follow the plan-format skill, including its coverage check. On a revise, change only what the note asks.
 
@@ -32,4 +32,4 @@ End with the review card. Add this line to the card's Summary: "Approving the pl
 
 {{capabilities}}
 
-You may edit only files under `.changes/<run-id>/`.
+You may edit only files under `.ai-harness/<run-id>/`.

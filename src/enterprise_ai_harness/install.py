@@ -111,6 +111,8 @@ def install_user(cfg: Config, copilot_dir: Path | None = None, vscode_user_dir: 
         if name in servers:
             messages.append(f"kept your existing server {name} in mcp.json")
             continue
+        if entry.get("type") == "streamable-http":
+            entry = {**entry, "type": "http"}  # VS Code's user mcp.json name for the same transport
         servers[name] = entry
         added.append(name)
     mcp_path.parent.mkdir(parents=True, exist_ok=True)

@@ -19,7 +19,7 @@ Setup steps for developers and maintainers are in [SETUP.md](SETUP.md).
 | 5 Implement | Implementer + a Task Runner per tier | code, `progress.md` | each task's diff and check result |
 | 6 Verify | Reviewer | `verification.md`, the PR | plan coverage, full test run, review |
 
-Runs live in `.changes/<run-id>/` in the clone. The run id is the Jira key, or `local-<date>-<slug>` for a plain request.
+Runs live in `.ai-harness/<run-id>/` in the clone. The run id is the Jira key, or `local-<date>-<slug>` for a plain request. The folder name is set by `runs.dir`; it is not `.changes/` (changie's folder) or `.harness/` (Harness CI's), so excluding it from git hides nothing else.
 
 Each stage ends with a card like this, with buttons under it:
 
@@ -33,9 +33,9 @@ Cost       18 of 80 tool calls
 [Approve and continue]  [Revise]  [Stop]
 ```
 
-You can also type `approve`, `revise: <note>`, `stop`, `extend` (adds 50% to the stage budget), or, to the orchestrator, `status`, `resume <run-id>`, `back to <stage>`, `save code graph`, `models`, `help`, `add skill ...`, `add server ...`.
+Typed commands work when the whole message is the command: `approve`, `revise: <note>`, `stop`, `extend` (adds 50% to the tool-call and output budgets of the current stage and its subagents), `back to <stage>`, `save code graph`, and, to the orchestrator, `resume <run-id>`. The orchestrator also answers `status`, `models`, `help`, `add skill ...` and `add server ...` in any wording. A sentence that only mentions a command, or a quoted `[harness:...]` marker, does nothing.
 
-You can edit any artifact before approving it. Approving records a hash of each artifact; if one changes afterwards, the next stage refuses to start until it is approved again.
+You can edit any artifact before approving it. Approving records a hash of each artifact. If an approved artifact changes afterwards, later approvals are refused, and so are code edits once the plan is involved, until the changed stage is approved again.
 
 ## Models
 
@@ -66,14 +66,14 @@ Who decides what:
 | Which models each tier means, and each stage agent's tier | the team | `harness.yaml`, shipped in the plugin |
 | Each task's tier | the Planner proposes, the person changes it during plan review | `- Tier:` on each task in `plan.md`; approval locks it |
 | Running a higher-tier task | the person | "Continue on the deep model" button in the Implementer |
-| Skipping a required cross-check | the person | "Approve without cross-check", recorded in `approval.json` |
+| Skipping a required cross-check | the person | "Approve and skip the cross-check", recorded in `approval.json` |
 
 How it works:
 
 - The build writes each agent's tier into its `model:` frontmatter and builds one Task Runner per tier ("Task Runner (fast)", ...). The Implementer runs each task with the Task Runner for its `Tier`.
 - VS Code does not start a subagent on a model that costs more than the calling session's model. A standard Implementer therefore cannot start the deep Task Runner directly. It stops before a deep task and shows "Continue on the deep model", a handoff that switches the session's model; after that, every tier up to deep can run. A new chat starts on the Implementer's own tier again.
 - The hook refuses a Task Runner whose tier differs from the task's `Tier` in the approved plan, or that sits above the session's tier, and its status line tells the agent which tier the session is on.
-- Cross-check: when the Planner's tier is below the checker's, the plan needs a review by the Plan Checker on the deep model before approval. The Planner's card has "Cross-check with the deep model". The Checker writes `plan-check.md`, a verdict and up to 10 findings, each with evidence. "Apply the findings" sends them back to the Planner, which fixes what it agrees with and lists what it did with each finding in `plan.md`. The hook blocks plan approval until the check has run, unless the person presses "Approve without cross-check". `approval.json` records the verdict and whether the plan changed after the check, or the skip.
+- Cross-check: when the Planner's tier is below the checker's, the plan needs a review by the Plan Checker on the deep model before approval. The Planner's card has "Cross-check with the deep model". The Checker writes `plan-check.md`, a verdict and up to 10 findings, each with evidence. "Apply the findings" sends them back to the Planner, which fixes what it agrees with and lists what it did with each finding in `plan.md`. The hook blocks plan approval until the check has run, unless the person presses "Approve and skip the cross-check". The Checker can write only its `plan-check.md`. `approval.json` records the verdict and whether the plan changed after the check, or the skip.
 - `when: always` requires the check whatever the tiers; `offer` adds the button only; `never` removes the Checker.
 - `harness doctor` reports an error when an agent's subagent has a higher tier than the agent, since VS Code would refuse to start it.
 
@@ -92,13 +92,16 @@ To avoid rebuilding that index in every clone, the harness commits a compressed 
 ```
 
 - First prompt in a clone: if `.codegraph/` is missing and a seed exists, the hook restores the index from the seed. CodeGraph compares file sizes, times and hashes when it starts and re-parses only files that changed since the seed.
-- No seed yet: the Harness Check runs `codegraph init` once and asks you to type `save code graph`, then commit `.codegraph-seed/`.
-- While the agent edits code: if the CodeGraph server is running, its file watcher keeps the index current. If not, the hook starts `codegraph sync` in the background after each edit or terminal command in the implement stage (at most once every 15 seconds).
+- The restore checks the seed first: a Git LFS pointer, a file that is not gzip, or one that does not hold a SQLite database is reported once and left alone, and CodeGraph builds the index on its own instead.
+- No seed yet: the Harness Check runs `codegraph init --yes` once and asks you to type `save code graph`, then commit `.codegraph-seed/`.
+- While the agent edits code: if the CodeGraph server is running, its file watcher keeps the index current. If not, the hook starts one background `codegraph sync` loop after an edit or terminal command in the implement stage. Edits made while it runs are queued, and the loop syncs again before it exits, so no edit is left out and syncs never overlap.
 - When verify is approved: the hook refreshes the seed according to `code.graph.index.seed_refresh` (`stale`, the default, refreshes when the seed is older than 7 days; `every-pr`; `manual`). The Reviewer commits it as a separate commit, "Refresh code graph seed".
 
 The seed is binary, so two branches that both refresh it will conflict. Resolve by taking either side; CodeGraph catches up on the next start. Teams that prefer a single writer can set `seed_refresh: manual` and use the scheduled workflow in [templates/codegraph-seed-refresh.yml](templates/codegraph-seed-refresh.yml). Seeds over 50 MB get a warning to move them to Git LFS.
 
-The hook and the code graph server deny agent edits to `.codegraph/` and `.codegraph-seed/`; only the hook writes there.
+The hook refuses agent edits to `.codegraph/` and `.codegraph-seed/`, including terminal commands that write there. Seed saves write to a temporary file in `.codegraph/` and rename it into place, so an interrupted save never leaves a partial file to commit. Saving needs Node.js 22.13 or later (for `node:sqlite`) or the `sqlite3` command; restoring works on any Node.
+
+The CodeGraph server runs with `CODEGRAPH_MCP_TOOLS=explore,node,search,callers,callees,impact`, because by default it exposes only `codegraph_explore`, and impact analysis needs callers and impact.
 
 ## This repository
 
@@ -109,7 +112,7 @@ sources/
                                task-runner is built once per tier, cross-checker once per checked stage
   skills/vendor/               vendored skills, pinned, with SOURCE.md and LICENSE
   skills/team/                 team-written skills and artifact templates
-  scripts/harness-hook.cjs     approvals, edit guard, budgets, run-file excludes
+  scripts/harness-hook.cjs     approvals, edit and command guard, budgets, sessions, run-file excludes
   scripts/codegraph-index.cjs  seed restore, background sync, seed save
 plugin/                        built output: what VS Code installs (do not edit)
 .github/plugin/marketplace.json  makes this repo a plugin marketplace
@@ -160,34 +163,45 @@ hooks:
 `harness.yaml` holds the team settings:
 
 - `plugin`: name, version, description, repository, and `server_prefix` in case VS Code namespaces plugin MCP tools.
-- `runs.commit`: `false` keeps `.changes/` local; `true` commits run files with the PR (runtime files stay excluded).
+- `runs.dir` and `runs.commit`: the run folder (default `.ai-harness`); `commit: false` keeps it local, `true` lets the Reviewer commit the run record with the PR (usage counters, sessions and locks stay excluded).
+- `skills_manual_only`: vendored skills that load only when someone types `/<name>` or an agent links them, so they do not take over the stages or developers' normal chats.
 - `servers`: MCP servers. HTTP servers sign in with OAuth in VS Code; stdio servers start on demand. `tools` narrows a server to named tools; `est_tools` feeds the tool-count check. A server with `enabled: false` or a `<placeholder>` value is left out, and its capabilities use their `alt` server or fallback.
 - `capabilities`: `bind`, `alt`, `tools` (narrowing per capability), `setup` (a one-time command the Harness Check runs), `index` (code graph seed settings), `fallback`.
 - `stages`, `agents`: stage order, artifacts, and each agent's built-in tool sets, capabilities, subagents and start-up skills.
 - `models`: tiers, each agent's tier, the default task tier, and cross-checks (see Models).
-- `review`, `budgets`, `models`, `hooks`, `skills`.
+- `review`, `budgets`, `hooks`, `skills`.
 
 Secrets never go in these files. Use OAuth servers, or `${input:<id>}` references that VS Code keeps in its secret storage. `harness doctor` flags anything that looks like a token.
 
 ## How approvals and budgets are enforced
 
-`harness-hook.cjs` runs as agent-scoped hooks set in each harness agent's frontmatter (`node "${PLUGIN_ROOT}/scripts/harness-hook.cjs" ...`), so it only runs while a harness agent is active:
+`harness-hook.cjs` runs as agent-scoped hooks set in each harness agent's frontmatter (`node "${PLUGIN_ROOT}/scripts/harness-hook.cjs" ...`). Subagents (Component Scout, Task Runners, Harness Check) carry their own hooks, because VS Code applies a subagent's frontmatter hooks, not its caller's, to the subagent's tool calls.
 
-- `UserPromptSubmit` records approvals. The approve buttons send `[harness:approve <stage>]`; the hook checks that earlier stages are approved and unchanged, hashes the stage's artifacts into `state.json`, and moves the run on. Plan approval also writes `approval.json`. The same hook adds `.changes/`, `.codegraph/` and `harness.local.yaml` to `.git/info/exclude` and restores the code graph seed.
-- `PreToolUse` limits edits: before plan approval, harness agents can only edit `.changes/`; after it, the Implementer and Task Runner can edit code, and the hook asks before edits to files not in `impact.json` (tests excepted). The Reviewer can only edit `.changes/`. It also enforces tool-call and output budgets per stage.
-- `PostToolUse` counts output size and starts the background code graph sync. `PreCompact` appends a status snapshot to `progress.md`.
+- `UserPromptSubmit` records approvals. The buttons send prompts that start with `[harness:approve <stage>]`; the hook checks that earlier stages are approved and unchanged, hashes the stage's artifacts into `state.json`, and moves the run on. Plan approval also writes `approval.json`. Approving implement needs every task in `plan.md` to have run and been reviewed. The hook also keeps the run folder, `.codegraph/` and `harness.local.yaml` in `.git/info/exclude` and restores the code graph seed.
+- `PreToolUse` guards edits and commands:
+  - Before plan approval, harness agents can only edit the run folder; after it, the Implementer and Task Runners can edit code, and the hook asks before edits to files not in `impact.json` (tests excepted). The Reviewer and the Checkers cannot change code.
+  - File paths are read from every place VS Code's edit tools put them, including `multi_replace_string_in_file` replacements and the file headers inside an `apply_patch` body. An implement-stage edit whose files cannot be identified still needs an approved plan.
+  - Terminal and sandbox commands (`run_in_terminal`, context-mode's execute tools) need an approved plan in implement. In other stages, a command that looks like it writes files outside the run folder needs the person's OK, and a command that writes hook-owned files is refused everywhere.
+  - Without a usable run (no `current`, or a `state.json` that does not parse), harness agents can only create run files, and approvals are refused with a reason instead of being ignored.
+  - A chat stays with the run it started on. If another chat switches the active run, approvals and edits from the first chat are refused until the person resumes its run.
+  - `stop` pauses the run: harness agents' tool calls are refused until `resume <run-id>`.
+  - Task Runners start only for task ids in the approved plan, on the task's tier, and only after the person reviewed the previous task (or batch, with `review.implement: per-batch-N`).
+  - Budgets: each stage has tool-call and output limits that start over when the stage starts or is revised; the orchestrator's budget lasts one request and a subagent's one dispatch. Counters are updated under a lock, so parallel tool calls are all counted.
+- `PostToolUse` counts output size and starts the background code graph sync. `PreCompact` appends a status note to `status.md`, which is not an approved artifact.
 
-Agents cannot edit `state.json`, `approval.json`, `.usage.json`, `.codegraph/`, `.codegraph-seed/` or (except the orchestrator) `.changes/current`. Only a Checker writes `<stage>-check.md`.
+Agents cannot edit `state.json`, `approval.json` or `.usage.json` of any run, `.codegraph/`, `.codegraph-seed/`, `harness.local.yaml`, or (except the orchestrator) the run folder's `current`. Only a Checker writes `<stage>-check.md`. Path checks ignore case on Windows and macOS.
+
+Personal settings can change review modes, budgets and audit logging only; the edit-tool patterns and the out-of-plan rule stay with the team configuration.
 
 This is a guardrail against mistakes, not a security boundary. Branch protection and PR review remain the real controls.
 
 ## Token use
 
-- Each agent sees only its own tools. Atlassian (about 120 tools) and the GitHub read server are narrowed to the few each capability needs. `harness doctor` prints the tool count and an estimate of tool-definition tokens per agent; with every default server configured that comes to 14 to 33 tools per agent.
+- Each agent sees only its own tools. Atlassian Rovo v2 (about 25 primary tools, about 250 with `?tools=all`) and the GitHub read server are narrowed to the few each capability needs. `harness doctor` prints the tool count and an estimate of tool-definition tokens per agent; with every default server configured that comes to 14 to 42 tools per agent, well under the 128-tool limit.
 - Heavy reading happens in subagents (Component Scout, Task Runner) that return summaries of 20 to 30 lines, so file contents stay out of the main conversation.
 - Stages hand over through files with size limits. A new chat resumes any run from those files with `resume <run-id>`.
 - CodeGraph returns symbols and call paths instead of whole files; context-mode keeps large command output in a sandbox.
-- Start-up skills are short. Long ones (writing-plans, subagent-driven-development) load only on demand.
+- Start-up skills are short. Long ones (writing-plans, subagent-driven-development) are manual-only, so Copilot does not load them from their descriptions.
 
 ## Embedded skills
 
@@ -195,26 +209,31 @@ This is a guardrail against mistakes, not a security boundary. Branch protection
 | --- | --- | --- |
 | grill-me | [mattpocock/skills](https://github.com/mattpocock/skills) (MIT) | Griller, at start |
 | to-questionnaire, handoff, tdd, code-review | mattpocock/skills (MIT) | on demand; code-review at Reviewer start |
-| writing-plans, subagent-driven-development, verification-before-completion | [obra/superpowers](https://github.com/obra/superpowers) (MIT) | on demand |
+| writing-plans, subagent-driven-development, verification-before-completion | [obra/superpowers](https://github.com/obra/superpowers) (MIT) | manual only (`/<name>`) |
+| ponytail | [DietrichGebert/ponytail](https://github.com/DietrichGebert/ponytail) (MIT) | Task Runners, at start; manual only elsewhere |
 | change-artifacts, intake, impact-analysis, plan-format | this repo | stage agents, at start |
 
 Upstream, grill-me's file only points to the grilling skill, so the harness ships them as one skill named grill-me: grilling's process under grill-me's name. Each vendored skill carries `SOURCE.md` (repo, path, commit, license) and the upstream `LICENSE`. Vendored skill bodies are not edited; harness rules live in the agent that loads the skill.
 
 ## Check during the pilot
 
-- Plugin hooks. Confirm that agent-scoped hooks in plugin agents run and that `${PLUGIN_ROOT}` expands in them. If an organization sets `allowManagedHooksOnly`, plugin hooks only run when the plugin is force-enabled through managed settings.
-- Plugin MCP server names. If tool references from plugin servers carry a prefix, set `plugin.server_prefix` and rebuild.
-- Session target. Hooks target the Local session target. Test the Copilot (agent host) target before relying on it.
-- Tool names in hook payloads. Turn on `hooks.audit` for a day; `.changes/.audit.log` shows the real tool names, so `edit_tools` and `terminal_tools` can be tightened.
-- Narrowed tool names. The Atlassian names come from Atlassian's supported-tools page; the GitHub read names are the common ones from github-mcp-server. A wrong name is ignored by VS Code, and the Harness Check shows the capability as missing.
+Most of the VS Code contract was checked against the current docs and the `microsoft/vscode` and `vscode-copilot-chat` sources (October 2026): hook events and stdin fields, exit code 2 for blocking, `${PLUGIN_ROOT}` expansion in plugin agents' hooks, subagent hooks, the `com.github.copilot/agents/` layout, `mcp.json` with `mcpServers`, tool names such as `create_file`, `replace_string_in_file`, `multi_replace_string_in_file`, `apply_patch`, `run_in_terminal` and `runSubagent`. Still worth confirming on your machines:
+
+- UserPromptSubmit `additionalContext` (the "Harness status" line) works in the current source, but the docs list only the common output fields for that event. If the line never appears, approvals still work; agents are told to stop and ask for the Harness Check.
+- Organization policy. With `allowManagedHooksOnly`, plugin hooks run only when the plugin is force-enabled through managed settings. Agent-scoped hooks also need a trusted workspace and `chat.useHooks` (on by default).
+- Session target. Agent-scoped hooks run in the Local harness only; the Copilot (agent host) target uses the Copilot CLI hook format.
+- Tool names in hook payloads for MCP tools. Turn on `hooks.audit` for a day; `.ai-harness/.audit.log` shows the real names.
+- Atlassian Rovo v2 needs its own sign-in (v1 credentials do not carry over), and two tools (remote links, transitions) are reached through `discover` and `executeRead`.
 - GitHub Enterprise Server needs the local GitHub MCP server instead of the hosted one. An Atlassian Data Center site needs a self-hosted Atlassian MCP server.
-- CodeGraph and context-mode run through npx and are not vendored; check their licenses and telemetry settings with your OSS review (`DO_NOT_TRACK=1` is set for CodeGraph).
+- Licenses: context-mode is under the Elastic License 2.0, not an OSI license; check it with your OSS review or set the `ctx` server to `enabled: false`. CodeGraph and the vendored skills are MIT.
+- Tool-set grouping. VS Code's source marks per-server tool sets (`<server>/*`) and user tool sets as deprecated for the Local harness. Narrowed names (`server/tool`) keep working; the `extras-<stage>` sets and `codegraph/*`, `ctx/*`, `kb/*` may need explicit tool lists later.
+- Models. That the handoff `model` field switches the session's model, and that each tier's models are allowed as subagents on your Copilot plan.
 - Seed size and conflicts on your largest repo.
-- Models. That the handoff `model` field switches the session's model, that a plugin agent's `model` list applies when it runs as a subagent, and that each tier's models are allowed as subagents on your Copilot plan.
 
 ## Development
 
 ```bash
-uv run --extra test pytest -q     # node 22.5+ is needed for the hook and code graph tests
+uv run --extra test pytest -q     # node 22.13+ is needed for the hook and code graph tests
+CODEGRAPH_E2E=1 uv run --extra test pytest -q tests/test_codegraph_e2e.py   # against the real CodeGraph CLI
 uv run harness build --check
 ```

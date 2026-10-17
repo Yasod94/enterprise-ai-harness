@@ -2,7 +2,7 @@
 
 ## Developers
 
-You need VS Code with GitHub Copilot signed in, Git, and Node.js 22.5 or later (the hook, CodeGraph and context-mode run on Node).
+You need VS Code with GitHub Copilot signed in, Git, and Node.js 22.13 or later (the hook, CodeGraph and context-mode run on Node).
 
 ### Once per machine
 
@@ -30,7 +30,7 @@ On the first run in a clone, the orchestrator calls the Harness Check, which rep
 - Seed committed, no local index: the hook restores the index from `.codegraph-seed/` on your first prompt. Nothing to do.
 - No seed yet: the Harness Check builds the index with `codegraph init` (a few minutes on a large repo). Then type `save code graph` and commit `.codegraph-seed/` so the rest of the team skips the build. A small PR of its own is fine.
 
-The hook adds `.changes/`, `.codegraph/` and `harness.local.yaml` to the clone's `.git/info/exclude`, so run files never show up in `git status`.
+The hook adds `.ai-harness/`, `.codegraph/` and `harness.local.yaml` to the clone's `.git/info/exclude`, so run files never show up in `git status`. If you used an earlier version that kept runs in `.changes/`, move or delete that folder and remove the `.changes/` line from `.git/info/exclude`; it may hide changie's files.
 
 Models need no setup. Each stage agent takes its model from the team's tiers. During plan review you can change any task's `Tier`; during implementation the Implementer asks you to press "Continue on the deep model" before a deep task. Type `models` to the orchestrator for a short explanation.
 

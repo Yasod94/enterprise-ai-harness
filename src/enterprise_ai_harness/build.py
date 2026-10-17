@@ -159,7 +159,7 @@ def render_cross_check_handoffs(cfg: Config, agent_id: str) -> str:
     nxt = next_stage(cfg, stage)
     if spec["required"]:
         target = agent_name(cfg, stage_agent(cfg, nxt)) if nxt else agent_name(cfg, "change-orchestrator")
-        out.append(handoff(f"Approve without cross-check", target,
+        out.append(handoff("Approve and skip the cross-check", target,
                            f"[harness:approve {stage}] skip cross-check. Approved; continue with the {nxt or 'next'} stage.",
                            True))
     return "\n".join(out)
@@ -299,17 +299,33 @@ def render_agent(cfg: Config, v: Variant) -> str:
 
 # ---------- other plugin files ----------
 
+def manual_only(skill_md: bytes) -> bytes:
+    """Add `disable-model-invocation: true` to a SKILL.md frontmatter, so Copilot loads the
+    skill only when someone types /<name>."""
+    text = skill_md.decode("utf-8")
+    if not text.startswith("---"):
+        return skill_md
+    end = text.find("\n---", 3)
+    if end < 0 or "disable-model-invocation:" in text[:end]:
+        return skill_md
+    return (text[:end] + "\ndisable-model-invocation: true" + text[end:]).encode("utf-8")
+
+
 def skill_files(cfg: Config) -> dict[str, dict[str, bytes]]:
     skills: dict[str, dict[str, bytes]] = {}
+    manual = set(cfg.skills_manual_only)
     for group in ("vendor", "team"):
         base = cfg.sources / "skills" / group
         if not base.exists():
             continue
         for skill_dir in sorted(p for p in base.iterdir() if p.is_dir()):
-            skills[skill_dir.name] = {
+            files = {
                 f.relative_to(skill_dir).as_posix(): f.read_bytes()
                 for f in sorted(skill_dir.rglob("*")) if f.is_file() and "__pycache__" not in f.parts
             }
+            if skill_dir.name in manual and "SKILL.md" in files:
+                files["SKILL.md"] = manual_only(files["SKILL.md"])
+            skills[skill_dir.name] = files
     return skills
 
 
@@ -322,9 +338,9 @@ def hook_config(cfg: Config) -> dict:
         "budgets": cfg.raw.get("budgets", {}),
         "review": cfg.raw.get("review", {}),
         "hooks": cfg.raw.get("hooks", {}),
-        "runs": cfg.raw.get("runs", {"commit": False}),
+        "runs": {"dir": cfg.runs_dir, "commit": bool((cfg.raw.get("runs") or {}).get("commit", False))},
         "code_index": cfg.code_index,
-        "allowed_paths": {"default": [".changes/"]},
+        "agent_scopes": {v.name: cfg.agents[v.agent_id]["scope"] for v in all_variants(cfg)},
         "models": models_config(cfg),
     }
 
@@ -348,8 +364,13 @@ def models_config(cfg: Config) -> dict:
 
 
 def server_entry(server: dict) -> dict:
+    """An mcp.json entry in Agent Plugins 1.0 form: remote servers are "streamable-http"
+    (or "sse"); VS Code's own mcp.json calls the same thing "http"."""
     skip = {"est_tools", "tools", "stages", "enabled", "optional"}
-    return {k: v for k, v in server.items() if k not in skip}
+    entry = {k: v for k, v in server.items() if k not in skip}
+    if entry.get("type") == "http":
+        entry["type"] = "streamable-http"
+    return entry
 
 
 def mcp_config(cfg: Config) -> dict:
@@ -380,7 +401,7 @@ def marketplace(cfg: Config) -> dict:
         "owner": {"name": p.get("owner", cfg.plugin_name)},
         "plugins": [{
             "name": cfg.plugin_name,
-            "source": PLUGIN_DIR,
+            "source": f"./{PLUGIN_DIR}",
             "description": p.get("description", ""),
             "version": p.get("version", "0.0.0"),
         }],

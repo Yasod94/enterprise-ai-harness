@@ -2,7 +2,7 @@
   "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
   "mcpServers": {
     "github-ro": {
-      "type": "http",
+      "type": "streamable-http",
       "url": "https://api.githubcopilot.com/mcp/",
       "headers": {
         "X-MCP-Toolsets": "repos,pull_requests,issues",
@@ -10,15 +10,16 @@
       }
     },
     "github-rw": {
-      "type": "http",
+      "type": "streamable-http",
       "url": "https://api.githubcopilot.com/mcp/",
       "headers": {
-        "X-MCP-Toolsets": "pull_requests,issues"
+        "X-MCP-Toolsets": "pull_requests,issues",
+        "X-MCP-Tools": "create_pull_request,update_pull_request,add_issue_comment"
       }
     },
     "atlassian": {
-      "type": "http",
-      "url": "https://mcp.atlassian.com/v1/mcp/authv2"
+      "type": "streamable-http",
+      "url": "https://mcp.atlassian.com/v2/mcp"
     },
     "codegraph": {
       "type": "stdio",
@@ -30,7 +31,8 @@
         "--mcp"
       ],
       "env": {
-        "DO_NOT_TRACK": "1"
+        "DO_NOT_TRACK": "1",
+        "CODEGRAPH_MCP_TOOLS": "explore,node,search,callers,callees,impact"
       }
     },
     "ctx": {
@@ -38,7 +40,7 @@
       "command": "npx",
       "args": [
         "-y",
-        "context-mode"
+        "context-mode@1.0.169"
       ]
     }
   }

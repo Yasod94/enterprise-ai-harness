@@ -24,8 +24,21 @@ def test_plugin_layout(harness):
     assert "orders-db-ro" not in mcp["mcpServers"]
     assert mcp["mcpServers"]["codegraph"]["env"]["DO_NOT_TRACK"] == "1"
     market = json.loads((harness / ".github/plugin/marketplace.json").read_text())
-    assert market["plugins"][0] == {"name": "enterprise-ai-harness", "source": "plugin",
+    assert market["plugins"][0] == {"name": "enterprise-ai-harness", "source": "./plugin",
                                     "description": manifest["description"], "version": manifest["version"]}
+    # Agent Plugins 1.0 names remote servers "streamable-http"; VS Code's own mcp.json says "http".
+    assert {s["type"] for s in mcp["mcpServers"].values()} <= {"stdio", "streamable-http"}
+    assert mcp["mcpServers"]["atlassian"]["url"] == "https://mcp.atlassian.com/v2/mcp"
+
+
+def test_manual_only_skills_and_hook_config(harness):
+    sdd = (harness / "plugin/skills/subagent-driven-development/SKILL.md").read_text()
+    assert "disable-model-invocation: true" in sdd.split("---")[1]
+    assert "disable-model-invocation" not in (harness / "sources/skills/vendor/subagent-driven-development/SKILL.md").read_text()
+    cfg = json.loads((harness / "plugin/scripts/config.json").read_text())
+    assert cfg["runs"] == {"dir": ".ai-harness", "commit": False}
+    assert cfg["agent_scopes"]["Task Runner (deep)"] == "implement-task"
+    assert cfg["agent_scopes"]["Component Scout"] == "scout" and cfg["agent_scopes"]["Plan Checker"] == "cross-check"
 
 
 def test_agent_frontmatter_hooks_use_plugin_root(harness):

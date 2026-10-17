@@ -2,7 +2,7 @@
 # Built by enterprise-ai-harness from sources/agents/component-scout.agent.md. Do not edit here.
 name: "Component Scout"
 description: "Read-only look at one component or one fact, returning a short evidence summary."
-tools: ['read', 'search', 'codegraph/*', 'github-ro/get_file_contents', 'github-ro/list_commits', 'github-ro/get_commit', 'github-ro/list_pull_requests', 'github-ro/get_pull_request', 'github-ro/search_code', 'atlassian/getAccessibleAtlassianResources', 'atlassian/searchConfluence', 'atlassian/getConfluenceContent', 'ctx/*', 'extras-impact']
+tools: ['read', 'search', 'codegraph/*', 'github-ro/get_file_contents', 'github-ro/list_commits', 'github-ro/get_commit', 'github-ro/list_pull_requests', 'github-ro/pull_request_read', 'github-ro/search_code', 'atlassian/getAccessibleAtlassianResources', 'atlassian/searchConfluence', 'atlassian/getConfluenceContent', 'ctx/*', 'extras-impact']
 model: ['Claude Haiku 4.5 (copilot)', 'GPT-5 mini (copilot)']
 user-invocable: false
 hooks:
@@ -49,7 +49,7 @@ For a single fact question (from the Griller), return only Answer, Evidence and 
 | code.graph | `codegraph/*` | Use search/codebase, search/usages and read the files directly. |
 | arch.graph | not configured (kb) | Use docs.search and the code itself, and say the architecture graph was unavailable. |
 | db.schema | not configured (orders-db-ro) | Read the schema migration files in the repo (for example db/migration, flyway, liquibase). |
-| repo.read | `github-ro/get_file_contents`, `github-ro/list_commits`, `github-ro/get_commit`, `github-ro/list_pull_requests`, `github-ro/get_pull_request`, `github-ro/search_code` | Use git log, git show and git blame in the terminal. |
+| repo.read | `github-ro/get_file_contents`, `github-ro/list_commits`, `github-ro/get_commit`, `github-ro/list_pull_requests`, `github-ro/pull_request_read`, `github-ro/search_code` | Use git log, git show and git blame in the terminal. |
 | docs.search | `atlassian/getAccessibleAtlassianResources`, `atlassian/searchConfluence`, `atlassian/getConfluenceContent` (standing in for kb) | Ask the person for page links. |
 | output.sandbox | `ctx/*` | Pipe long command output through tail or grep before reading it. |
 

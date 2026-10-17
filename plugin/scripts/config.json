@@ -1,6 +1,6 @@
 {
   "plugin": "enterprise-ai-harness",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "stages": [
     "intake",
     "grill",
@@ -58,7 +58,8 @@
       "output_kb": 600
     },
     "implement-task": {
-      "tool_calls": 30
+      "tool_calls": 30,
+      "output_kb": 200
     },
     "verify": {
       "tool_calls": 40
@@ -83,6 +84,7 @@
     "out_of_plan_files": "ask"
   },
   "runs": {
+    "dir": ".ai-harness",
     "commit": false
   },
   "code_index": {
@@ -93,10 +95,21 @@
     "seed_refresh": "stale",
     "seed_max_age_days": 7
   },
-  "allowed_paths": {
-    "default": [
-      ".changes/"
-    ]
+  "agent_scopes": {
+    "Change Orchestrator": "orchestrator",
+    "Harness Check": "check",
+    "Intake": "intake",
+    "Griller": "grill",
+    "Impact Analyst": "impact",
+    "Component Scout": "scout",
+    "Planner": "plan",
+    "Implementer": "implement",
+    "Task Runner (fast)": "implement-task",
+    "Task Runner (standard)": "implement-task",
+    "Task Runner (deep)": "implement-task",
+    "Plan Checker": "cross-check",
+    "Impact Checker": "cross-check",
+    "Reviewer": "verify"
   },
   "models": {
     "order": [

@@ -32,6 +32,7 @@ def test_install_and_uninstall(harness, tmp_path):
     servers = json.loads((vscode / "mcp.json").read_text())["servers"]
     assert servers["github-ro"]["url"] == "https://mine" and "other" in servers
     assert servers["kb"]["url"] == "https://kb.example.internal/mcp" and "codegraph" in servers
+    assert servers["kb"]["type"] == "http"  # VS Code's user mcp.json name for streamable HTTP
 
     # Reinstall is clean, uninstall removes only what was added.
     install_user(load(harness), copilot, vscode)

@@ -31,7 +31,7 @@ handoffs:
     prompt: "[harness:cross-check plan] Check plan.md before the person approves it."
     send: true
     model: "Claude Opus 5.5 (copilot)"
-  - label: "Approve without cross-check"
+  - label: "Approve and skip the cross-check"
     agent: "Implementer"
     prompt: "[harness:approve plan] skip cross-check. Approved; continue with the implement stage."
     send: true
@@ -52,7 +52,7 @@ Before you start, read and follow these skills:
 - [change-artifacts](../../skills/change-artifacts/SKILL.md)
 - [plan-format](../../skills/plan-format/SKILL.md)
 
-Read `.changes/current`, then `requirement.md`, `clarifications.md` and `impact.json`. Read code only to name exact files and symbols, through code.graph first.
+Read `.ai-harness/current`, then `requirement.md`, `clarifications.md` and `impact.json`. Read code only to name exact files and symbols, through code.graph first.
 
 Follow the plan-format skill, including its coverage check. On a revise, change only what the note asks.
 
@@ -80,4 +80,4 @@ End with the review card. Add this line to the card's Summary: "Approving the pl
 
 Tools the person added for themselves are in the `extras-plan` tool set, if it exists.
 
-You may edit only files under `.changes/<run-id>/`.
+You may edit only files under `.ai-harness/<run-id>/`.

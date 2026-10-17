@@ -72,7 +72,7 @@ def cmd_install_user(args) -> int:
 
 def cmd_status(args) -> int:
     repo = Path(args.repo).resolve()
-    changes = repo / ".changes"
+    changes = repo / ".ai-harness"
     current = (changes / "current").read_text().strip() if (changes / "current").exists() else None
     runs = sorted(changes.glob("*/state.json")) if changes.exists() else []
     if not runs:

@@ -106,6 +106,15 @@ def check(root=None, live: bool = False) -> list[Finding]:
 
     out.extend(check_models(cfg))
 
+    builtin_sets = {"read", "search", "edit", "execute", "agent", "todo", "web", "browser", "vscode"}
+    renamed = {"todos": "todo", "runCommands": "execute", "editFiles": "edit", "codebase": "search"}
+    for agent_id, agent in cfg.agents.items():
+        for name in agent.get("builtin") or []:
+            if name in renamed:
+                out.append(Finding("warn", f"{agent_id}: built-in tool set '{name}' was renamed; use '{renamed[name]}'"))
+            elif name not in builtin_sets and "/" not in name:
+                out.append(Finding("warn", f"{agent_id}: '{name}' is not a VS Code built-in tool set; VS Code ignores unknown names"))
+
     report = build(cfg, check=True)
     if report.changed:
         out.append(Finding("error", f"plugin/ is out of date ({len(report.written) + len(report.removed)} files); run `harness build`"))

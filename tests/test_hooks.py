@@ -45,34 +45,43 @@ def approve_through_plan(c, run, impact_files=("src/OrderPublisher.java",)):
     assert approve(c, "plan", extra="skip cross-check")[0] == 0
 
 
-def test_no_active_run_means_no_interference(ctx):
-    code, out, _ = edit(ctx, "grill", "src/Main.java")
-    assert code == 0 and out is None
+def test_no_run_limits_agents_to_run_files(ctx):
+    _, out, _ = edit(ctx, "grill", "src/Main.java")
+    assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert "no active run" in out["hookSpecificOutput"]["permissionDecisionReason"]
+    _, out, _ = run_hook(ctx, "pre-tool", "implement", {"tool_name": "run_in_terminal", "tool_input": {"command": "make"}})
+    assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert edit(ctx, "orchestrator", ".ai-harness/ABC-1/state.json")[1] is None  # creating a run
+    assert edit(ctx, "orchestrator", ".ai-harness/current")[1] is None
+    code, _, err = approve(ctx, "intake")
+    assert code == 2 and "no active run" in err
+    code, out, _ = run_hook(ctx, "prompt", "intake", {"prompt": "hello"})
+    assert code == 0 and "No active run" in out["hookSpecificOutput"]["additionalContext"]
 
 
 def test_pre_plan_stage_can_only_edit_change_folder(ctx):
     start_run(ctx[1])
     code, out, _ = edit(ctx, "grill", "src/Main.java")
     assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
-    code, out, _ = edit(ctx, "grill", ".changes/ABC-123/clarifications.md")
+    code, out, _ = edit(ctx, "grill", ".ai-harness/ABC-123/clarifications.md")
     assert out is None
-    usage = json.loads((ctx[1] / ".changes/ABC-123/.usage.json").read_text())
+    usage = json.loads((ctx[1] / ".ai-harness/ABC-123/.usage.json").read_text())
     assert usage["grill"]["tool_calls"] == 1
 
 
 def test_state_file_and_current_pointer_are_protected(ctx):
     start_run(ctx[1])
-    _, out, _ = edit(ctx, "intake", ".changes/ABC-123/state.json")
+    _, out, _ = edit(ctx, "intake", ".ai-harness/ABC-123/state.json")
     assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
-    _, out, _ = edit(ctx, "intake", ".changes/current")
+    _, out, _ = edit(ctx, "intake", ".ai-harness/current")
     assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
-    _, out, _ = edit(ctx, "orchestrator", ".changes/current")
+    _, out, _ = edit(ctx, "orchestrator", ".ai-harness/current")
     assert out is None
 
 
 def test_absolute_paths_are_normalised(ctx):
     start_run(ctx[1])
-    _, out, _ = edit(ctx, "grill", str(ctx[1] / ".changes/ABC-123/clarifications.md"))
+    _, out, _ = edit(ctx, "grill", str(ctx[1] / ".ai-harness/ABC-123/clarifications.md"))
     assert out is None
     _, out, _ = edit(ctx, "grill", "file://" + str(ctx[1] / "src/Main.java"))
     assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
@@ -149,7 +158,7 @@ def test_budget_denies_then_extend_allows(ctx):
     assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
     assert "Budget for intake reached" in out["hookSpecificOutput"]["permissionDecisionReason"]
     code, out, _ = run_hook(ctx, "prompt", "intake", {"prompt": "extend"})
-    assert "extended by 10" in out["hookSpecificOutput"]["additionalContext"]
+    assert "Budgets for intake extended by 50%" in out["hookSpecificOutput"]["additionalContext"]
     _, out, _ = run_hook(ctx, "pre-tool", "intake", {"tool_name": "readFile", "tool_input": {}})
     assert out is None
 
@@ -175,24 +184,26 @@ def test_task_dispatch_and_task_approval_reset_task_budget(ctx):
     (run / ".usage.json").write_text(json.dumps({"implement-task": {"tool_calls": 30, "output_bytes": 0}}))
     _, out, _ = edit(ctx, "implement-task", "src/OrderPublisher.java")
     assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
-    run_hook(ctx, "pre-tool", "implement", {"tool_name": "runSubagent", "tool_input": {}})
+    run_hook(ctx, "pre-tool", "implement", {"tool_name": "runSubagent", "tool_input": {
+        "agentName": "Task Runner (standard)", "prompt": "T1: implement", "description": "T1"}})
     _, out, _ = edit(ctx, "implement-task", "src/OrderPublisher.java")
     assert out is None
     code, out, _ = run_hook(ctx, "prompt", "implement", {"prompt": "[harness:approve task] next"})
-    assert "Task approval 1 recorded" in out["hookSpecificOutput"]["additionalContext"]
+    assert "Task review 1 recorded" in out["hookSpecificOutput"]["additionalContext"]
 
 
 def test_status_line_and_hooks_ok_marker(ctx):
     start_run(ctx[1])
     _, out, _ = run_hook(ctx, "prompt", "grill", {"prompt": "what next?"})
     assert "Harness status: run ABC-123" in out["hookSpecificOutput"]["additionalContext"]
-    assert (ctx[1] / ".changes/.hooks-ok").exists()
+    assert (ctx[1] / ".ai-harness/.hooks-ok").exists()
 
 
 def test_pre_compact_writes_status(ctx):
     run = start_run(ctx[1])
     run_hook(ctx, "pre-compact", "grill", {"trigger": "auto"})
-    assert "Status at compaction" in (run / "progress.md").read_text()
+    assert "Status at compaction" in (run / "status.md").read_text()
+    assert not (run / "progress.md").exists()  # approved artifacts are never touched
 
 
 def test_broken_hook_input_never_blocks(ctx):
@@ -209,12 +220,12 @@ def test_run_files_are_excluded_locally(ctx):
     start_run(repo)
     run_hook(ctx, "prompt", "intake", {"prompt": "hello"})
     exclude = (repo / ".git/info/exclude").read_text()
-    assert ".changes/" in exclude and "harness.local.yaml" in exclude and ".codegraph/" in exclude
+    assert ".ai-harness/" in exclude and "harness.local.yaml" in exclude and ".codegraph/" in exclude
     run_hook(ctx, "prompt", "intake", {"prompt": "again"})
-    assert (repo / ".git/info/exclude").read_text().count(".changes/") == 1
+    assert (repo / ".git/info/exclude").read_text().count(".ai-harness/") == 1
     import subprocess
     status = subprocess.run(["git", "status", "--porcelain"], cwd=repo, capture_output=True, text=True).stdout
-    assert ".changes" not in status
+    assert ".ai-harness" not in status
 
 
 def test_personal_settings_from_home_dir(ctx, tmp_path):

@@ -19,10 +19,10 @@ Stage 1 of 6. You turn the active run's request into `requirement.md`.
 
 {{skills}}
 
-Start by reading `.changes/current` and that run's `state.json`. If `requirement.md` already exists, you are revising: read it and the person's note, and change only what the note asks.
+Start by reading `.ai-harness/current` and that run's `state.json`. If `requirement.md` already exists, you are revising: read it and the person's note, and change only what the note asks.
 
 Follow the intake skill, then end with the review card.
 
 {{capabilities}}
 
-You may edit only files under `.changes/<run-id>/`.
+You may edit only files under `.ai-harness/<run-id>/`.

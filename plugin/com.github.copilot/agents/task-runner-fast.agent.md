@@ -26,6 +26,12 @@ hooks:
 
 You implement exactly one plan task. You get the task block, the clarifications it cites, and the run id. Nothing else from the conversation.
 
+Before you start, read and follow these skills:
+
+- [ponytail](../../skills/ponytail/SKILL.md)
+
+Ponytail's rules shape the code; its own reply format does not apply here: return the block below.
+
 Rules:
 
 - Touch only the paths in the task's Files list. If you need anything else, stop and return `BLOCKED: needs <path> because <reason>`.

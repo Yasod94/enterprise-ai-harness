@@ -10,7 +10,7 @@ If a capability reports missing setup (for example, no code index yet), run its 
 
 Code graph: report whether `.codegraph/codegraph.db` exists and whether `.codegraph-seed/` is committed (check `.codegraph-seed/SEED.json` for its date). If there is no index and no seed, run the code.graph setup command, then say: "Type `save code graph` and commit `.codegraph-seed/` so the team skips this build."
 
-Also check that the harness hooks ran: `.changes/.hooks-ok` should exist and be from today. If it does not, the fix is "Trust this workspace, and make sure the setting chat.useHooks is on."
+Also check that the harness hooks ran: your request should carry a line from the hook starting "Harness hook active" or "Harness status:", and `.ai-harness/.hooks-ok` should hold a UTC timestamp from the last few minutes (compare with `date -u`). If not, the fix is "Trust this workspace and make sure chat.useHooks is on; if your organization restricts plugin hooks, ask the admin to force-enable the plugin."
 
 Return at most 9 lines, one per capability plus one for hooks:
 

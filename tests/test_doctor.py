@@ -57,3 +57,10 @@ def test_server_tool_names_in_agent_text_are_flagged(harness):
     assert not levels(check(harness), "names server tool")
     path.write_text(text + "\nCall codegraph/codegraph_search first.\n")
     assert "warn" in levels(check(harness), "names server tool codegraph/c")
+
+
+def test_legacy_builtin_tool_set_names_are_flagged(harness):
+    text = (harness / "harness.yaml").read_text().replace("agent, todo]", "agent, todos]", 1)
+    (harness / "harness.yaml").write_text(text)
+    build(load(harness))
+    assert "warn" in levels(check(harness), "'todos' was renamed")

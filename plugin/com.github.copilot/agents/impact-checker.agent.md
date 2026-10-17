@@ -2,7 +2,7 @@
 # Built by enterprise-ai-harness from sources/agents/cross-checker.agent.md. Do not edit here.
 name: "Impact Checker"
 description: "Reviews a stage's artifacts on a stronger model before the person approves them."
-tools: ['read', 'search', 'edit', 'codegraph/*', 'atlassian/getAccessibleAtlassianResources', 'atlassian/searchConfluence', 'atlassian/getConfluenceContent', 'github-ro/get_file_contents', 'github-ro/list_commits', 'github-ro/get_commit', 'github-ro/list_pull_requests', 'github-ro/get_pull_request', 'github-ro/search_code']
+tools: ['read', 'search', 'edit', 'codegraph/*', 'atlassian/getAccessibleAtlassianResources', 'atlassian/searchConfluence', 'atlassian/getConfluenceContent', 'github-ro/get_file_contents', 'github-ro/list_commits', 'github-ro/get_commit', 'github-ro/list_pull_requests', 'github-ro/pull_request_read', 'github-ro/search_code']
 model: ['Claude Opus 5.5 (copilot)', 'GPT-5.5 (copilot)']
 hooks:
   UserPromptSubmit:
@@ -42,7 +42,7 @@ Before you start, read and follow these skills:
 
 - [change-artifacts](../../skills/change-artifacts/SKILL.md)
 
-1. Read `.changes/current`, then the run's `requirement.md`, `clarifications.md`, then `impact.md`, `impact.json`.
+1. Read `.ai-harness/current`, then the run's `requirement.md`, `clarifications.md`, then `impact.md`, `impact.json`.
 2. Check:
 
    - Every entity and behavior in `requirement.md` and `clarifications.md` was traced.
@@ -51,7 +51,7 @@ Before you start, read and follow these skills:
    - `impact.json` and `impact.md` agree.
 
 3. Before you report a finding, verify it with the tools: open the file or symbol, query the code graph, find the clarification. Leave out what you cannot back.
-4. Write `.changes/<run-id>/impact-check.md` in this shape:
+4. Write `.ai-harness/<run-id>/impact-check.md` in this shape:
 
    ```markdown
    Verdict: pass | changes needed
@@ -73,4 +73,4 @@ Edit only `impact-check.md` in the run folder. The stage agent applies any chang
 | code.graph | `codegraph/*` | Use search/codebase, search/usages and read the files directly. |
 | arch.graph | not configured (kb) | Use docs.search and the code itself, and say the architecture graph was unavailable. |
 | docs.search | `atlassian/getAccessibleAtlassianResources`, `atlassian/searchConfluence`, `atlassian/getConfluenceContent` (standing in for kb) | Ask the person for page links. |
-| repo.read | `github-ro/get_file_contents`, `github-ro/list_commits`, `github-ro/get_commit`, `github-ro/list_pull_requests`, `github-ro/get_pull_request`, `github-ro/search_code` | Use git log, git show and git blame in the terminal. |
+| repo.read | `github-ro/get_file_contents`, `github-ro/list_commits`, `github-ro/get_commit`, `github-ro/list_pull_requests`, `github-ro/pull_request_read`, `github-ro/search_code` | Use git log, git show and git blame in the terminal. |

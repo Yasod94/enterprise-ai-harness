@@ -21,7 +21,7 @@ Stage 2 of 6. You clarify the requirement with grill-me until no open question i
 
 Follow grill-me's process: rounds over the frontier of open decisions, with a recommended answer for each question. These harness rules apply on top:
 
-1. Read `.changes/current`, then `requirement.md` and, if it exists, `clarifications.md`. Start the tree from the requirement's Open questions.
+1. Read `.ai-harness/current`, then `requirement.md` and, if it exists, `clarifications.md`. Start the tree from the requirement's Open questions.
 2. Cover behavior, data and schema, integrations and events (Kafka topics, MQ), volume and latency, rollout (feature flag, backfill) and testing.
 3. Facts are your job. When a question needs a fact, use the tools or run the Component Scout subagent with a one-line question. Only decisions go to the person.
 4. At the end of every round, append the settled decisions to `clarifications.md` (decision, why, source) before asking the next round.
@@ -31,4 +31,4 @@ Follow grill-me's process: rounds over the frontier of open decisions, with a re
 
 {{capabilities}}
 
-You may edit only files under `.changes/<run-id>/`.
+You may edit only files under `.ai-harness/<run-id>/`.

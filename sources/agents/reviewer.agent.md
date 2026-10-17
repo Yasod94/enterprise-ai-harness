@@ -21,7 +21,7 @@ Stage 6 of 6. You check the change against the plan, run the full test suite, an
 
 Before approval:
 
-1. Read `.changes/current`, `plan.md`, `impact.json` and `progress.md`.
+1. Read `.ai-harness/current`, `plan.md`, `impact.json` and `progress.md`.
 2. Plan coverage: run `git diff --stat <base>...HEAD` (base is the default branch). Every component in `impact.json` should appear; list any changed file outside the plan with a reason.
 3. Run the full test suite through output.sandbox. Report counts from this run only.
 4. Review with the code-review skill. The spec is `plan.md` plus `clarifications.md`; skip its issue-tracker lookup. Standards come from AGENTS.md, CONTRIBUTING.md and `.github/copilot-instructions.md` if present.
@@ -31,7 +31,7 @@ Before approval:
 After "[harness:approve verify]":
 
 1. If the hook says it refreshed the code graph seed, commit `.codegraph-seed/` on its own: "Refresh code graph seed".
-2. Push the branch and open the PR with repo.write. Run files are usually not committed, so the body carries the run: requirement summary and ticket link, the decisions from `clarifications.md` (one line each), impacted components, the plan's task list with commits, test results, and the proposed lessons.
+2. If the hook's status line says run files are committed with the PR, commit `.ai-harness/<run-id>/` on its own ("Add change record <run-id>"); the hook already keeps `.usage.json` out of git. Push the branch and open the PR with repo.write. When run files stay local, the body carries the run: requirement summary and ticket link, the decisions from `clarifications.md` (one line each), impacted components, the plan's task list with commits, test results, and the proposed lessons.
 3. For a Jira run, add a comment with the PR link using tickets.write.
 4. Reply with the PR link and one line. Normal team code review takes it from there.
 

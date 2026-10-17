@@ -67,7 +67,7 @@ def test_required_plan_check_adds_check_and_skip_buttons(harness):
     check_btn = labels["Cross-check with the deep model"]
     assert check_btn["agent"] == "Plan Checker" and check_btn["model"] == DEEP
     assert check_btn["prompt"].startswith("[harness:cross-check plan]")
-    assert "skip cross-check" in labels["Approve without cross-check"]["prompt"]
+    assert labels["Approve and skip the cross-check"]["prompt"].startswith("[harness:approve plan] skip cross-check")
     checker = fm(harness, "plan-checker")
     assert checker["name"] == "Plan Checker" and checker["model"][0] == DEEP
     targets = {h["label"]: h["agent"] for h in checker["handoffs"]}
@@ -78,14 +78,14 @@ def test_required_plan_check_adds_check_and_skip_buttons(harness):
 
 def test_offered_check_has_no_skip_button(harness):
     labels = [h["label"] for h in fm(harness, "impact-analyst")["handoffs"]]
-    assert "Cross-check with the deep model" in labels and "Approve without cross-check" not in labels
+    assert "Cross-check with the deep model" in labels and "Approve and skip the cross-check" not in labels
     assert fm(harness, "impact-checker")["handoffs"][0]["agent"] == "Impact Analyst"
 
 
 def test_check_not_required_when_stage_already_on_the_checker_tier(harness):
     edit_yaml(harness, "    planner: standard\n", "    planner: deep\n")
     labels = [h["label"] for h in fm(harness, "planner")["handoffs"]]
-    assert "Cross-check with the deep model" in labels and "Approve without cross-check" not in labels
+    assert "Cross-check with the deep model" in labels and "Approve and skip the cross-check" not in labels
     cfg = json.loads((harness / "plugin/scripts/config.json").read_text())
     assert cfg["models"]["cross_check"]["plan"]["required"] is False
 
@@ -175,7 +175,7 @@ def test_plan_approval_needs_the_cross_check(harness, service):
     _, out, _ = prompt(harness, service, "plan", "what next?")
     assert "A cross-check on the deep tier is required before plan" in out["hookSpecificOutput"]["additionalContext"]
     code, _, err = prompt(harness, service, "plan", "[harness:approve plan] go")
-    assert code == 2 and 'Press "Cross-check with the deep model"' in err
+    assert code == 2 and 'press "Cross-check with the deep model"' in err
     assert "plan" not in state(run)["approvals"]
 
 
@@ -201,9 +201,9 @@ def test_cross_check_flow_records_verdict_and_later_edits(harness, service):
     # Only the Checker writes plan-check.md; it may not touch code or the plan.
     edit = lambda scope, path: run_hook(harness, service, "pre-tool", scope,
                                         {"tool_name": "editFiles", "tool_input": {"filePath": path}})[1]
-    assert edit("cross-check", ".changes/ABC-123/plan-check.md") is None
+    assert edit("cross-check", ".ai-harness/ABC-123/plan-check.md") is None
     assert edit("cross-check", "src/OrderPublisher.java")["hookSpecificOutput"]["permissionDecision"] == "deny"
-    assert edit("plan", ".changes/ABC-123/plan-check.md")["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert edit("plan", ".ai-harness/ABC-123/plan-check.md")["hookSpecificOutput"]["permissionDecision"] == "deny"
 
     (run / "plan-check.md").write_text("Verdict: changes needed\n\n## Findings\n\n1. [high] T2 misses the DLQ.\n")
     (run / "plan.md").write_text(PLAN + "\n## Cross-check findings\n\n1. Added the DLQ step to T2.\n")
@@ -251,6 +251,9 @@ def test_task_runner_must_match_the_planned_tier_and_session(harness, service):
     assert out["hookSpecificOutput"]["permissionDecision"] == "deny" and 'Run "Task Runner (fast)" instead' in reason
     assert dispatch(harness, service, "Task Runner (fast)", "T1")[1] is None
 
+    _, out, _ = dispatch(harness, service, "Task Runner (deep)", "T2")
+    assert "has not reviewed the previous task" in out["hookSpecificOutput"]["permissionDecisionReason"]
+    prompt(harness, service, "implement", "[harness:approve task] Continue with the next task.", session_id="s1")
     _, out, _ = dispatch(harness, service, "Task Runner (deep)", "T2")
     assert "this session runs on standard" in out["hookSpecificOutput"]["permissionDecisionReason"]
 

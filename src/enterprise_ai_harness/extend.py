@@ -98,7 +98,9 @@ def vendor_github_skill(dest: Path, owner: str, name: str, skill: str | None, re
         _git(["checkout", "-q", "FETCH_HEAD"], work)
         commit = _git(["rev-parse", "HEAD"], work)
         if skill:
-            matches = sorted(p.parent for p in work.rglob("SKILL.md") if p.parent.name == skill and ".git" not in p.parts)
+            # Prefer the canonical copy: no hidden folders (.openclaw/, .claude/...) and the shallowest path.
+            matches = sorted((p.parent for p in work.rglob("SKILL.md") if p.parent.name == skill and ".git" not in p.parts),
+                             key=lambda d: (any(part.startswith(".") for part in d.relative_to(work).parts), len(d.parts), str(d)))
         else:
             matches = [work] if (work / "SKILL.md").exists() else []
         if not matches:

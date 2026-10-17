@@ -52,10 +52,10 @@ def run_hook(harness: Path, repo: Path, mode: str, scope: str, event: dict | Non
 
 
 def start_run(repo: Path, run_id: str = "ABC-123") -> Path:
-    run = repo / ".changes" / run_id
+    run = repo / ".ai-harness" / run_id
     run.mkdir(parents=True, exist_ok=True)
     (run / "state.json").write_text(json.dumps({"run": run_id, "source": "jira", "stage": "intake", "approvals": {}}))
-    (repo / ".changes" / "current").write_text(run_id + "\n")
+    (repo / ".ai-harness" / "current").write_text(run_id + "\n")
     return run
 
 

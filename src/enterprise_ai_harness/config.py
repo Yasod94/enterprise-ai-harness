@@ -94,6 +94,14 @@ class Config:
         return self.raw.get("skills", []) or []
 
     @property
+    def runs_dir(self) -> str:
+        return str((self.raw.get("runs") or {}).get("dir") or ".ai-harness").rstrip("/")
+
+    @property
+    def skills_manual_only(self) -> list[str]:
+        return list(self.raw.get("skills_manual_only") or [])
+
+    @property
     def code_index(self) -> dict:
         return copy.deepcopy(self.capabilities.get("code.graph", {}).get("index", {}) or {})
 
@@ -338,6 +346,8 @@ def validate(cfg: Config) -> list[str]:
             errors.append(f"models.cross_check.{stage}: checker must be a tier name")
         if spec.get("when") != "never" and CHECKER_AGENT not in cfg.agents:
             errors.append(f"models.cross_check.{stage}: needs the {CHECKER_AGENT} agent")
+    if not re.fullmatch(r"\.?[A-Za-z0-9][\w.-]*", cfg.runs_dir) or cfg.runs_dir in (".git", ".github", ".vscode"):
+        errors.append("runs.dir must be one folder name at the repo root, such as .ai-harness")
     refresh = cfg.code_index.get("seed_refresh", "stale")
     if refresh not in ("stale", "every-pr", "manual"):
         errors.append("code.graph index.seed_refresh must be stale, every-pr or manual")

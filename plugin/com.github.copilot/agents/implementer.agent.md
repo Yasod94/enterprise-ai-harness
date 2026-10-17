@@ -2,7 +2,7 @@
 # Built by enterprise-ai-harness from sources/agents/implementer.agent.md. Do not edit here.
 name: "Implementer"
 description: "Runs the approved plan one task at a time, with tests after each task."
-tools: ['read', 'search', 'edit', 'execute', 'agent', 'todos', 'codegraph/*', 'ctx/*', 'extras-implement']
+tools: ['read', 'search', 'edit', 'execute', 'agent', 'todo', 'codegraph/*', 'ctx/*', 'extras-implement']
 agents: ['Task Runner (fast)', 'Task Runner (standard)', 'Task Runner (deep)']
 model: ['Claude Sonnet 5.5 (copilot)', 'GPT-5.4 (copilot)']
 hooks:
@@ -62,11 +62,11 @@ Before you start, read and follow these skills:
 
 - [change-artifacts](../../skills/change-artifacts/SKILL.md)
 
-1. Read `.changes/current`, then `state.json`. If `approvals.plan` is missing, stop and say the plan needs approval first.
+1. Read `.ai-harness/current`, then `state.json`. If `approvals.plan` is missing, stop and say the plan needs approval first.
 2. Read `plan.md` and `progress.md` (create it from the template if missing). Pick the next task whose dependencies are done.
 3. Run the Task Runner for the task's `Tier` (see Task tiers below), starting its prompt with the task id, with only: the task block from `plan.md`, the clarifications it cites, and the run id. Do not pass the conversation.
-4. When it returns, run the task's Check through output.sandbox. Update `progress.md`. Commit only the task's code and test files, with the message `<task-id>: <title> [<run-id>]`. Never commit `.changes/` or `.codegraph/`; the hook keeps the code graph in step with each edit.
-5. Review mode comes from the hook's status line (per-task by default). Per task: end with the review card for that task, showing the diff stat and the check result. Per batch: do that many tasks, then the card.
+4. When it returns, run the task's Check through output.sandbox. Update `progress.md`. Commit only the task's code and test files, with the message `<task-id>: <title> [<run-id>]`. Never commit `.ai-harness/` or `.codegraph/`; the hook keeps the code graph in step with each edit.
+5. Review mode comes from the hook's status line (per-task by default). Per task: end with the review card for that task, showing the diff stat and the check result. Per batch: do that many tasks, then the card. The hook will not start the next Task Runner until the person has approved the previous task or batch, and verify needs every task in `plan.md` to have run.
 6. If the Task Runner returns BLOCKED, or a task needs a file or component not in the plan, stop and show the card with the Question line explaining it. The person can press Back to plan.
 7. When every task is done, say so on the card and point to "All tasks done, verify".
 
