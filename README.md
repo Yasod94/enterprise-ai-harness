@@ -1,4 +1,4 @@
-# change-harness
+# enterprise-ai-harness
 
 A VS Code agent plugin for GitHub Copilot. A developer gives it a Jira key or a sentence, and Copilot works through six stages: intake, grill, impact, plan, implement and verify. Each stage ends with a short review card, and nothing moves on until the developer approves. Code edits stay locked until the plan is approved.
 
@@ -113,7 +113,7 @@ sources/
   scripts/codegraph-index.cjs  seed restore, background sync, seed save
 plugin/                        built output: what VS Code installs (do not edit)
 .github/plugin/marketplace.json  makes this repo a plugin marketplace
-src/change_harness/            the `harness` build tool
+src/enterprise_ai_harness/            the `harness` build tool
 templates/                     optional files for service repos
 tests/
 ```
@@ -143,7 +143,7 @@ tests/
 
 Listing a skill under `stages` makes those stage agents load it at start. Without that, Copilot loads it on demand from its description.
 
-Personal settings go in `~/.copilot/change-harness.local.yaml` (all repos) or `harness.local.yaml` at a clone's root (that clone only; excluded from git by the hook). The hook reads them directly, so only nested `key: value` lines work:
+Personal settings go in `~/.copilot/enterprise-ai-harness.local.yaml` (all repos) or `harness.local.yaml` at a clone's root (that clone only; excluded from git by the hook). The hook reads them directly, so only nested `key: value` lines work:
 
 ```yaml
 review:
@@ -193,12 +193,12 @@ This is a guardrail against mistakes, not a security boundary. Branch protection
 
 | Skill | Source | Used by |
 | --- | --- | --- |
-| grill-me, grilling | [mattpocock/skills](https://github.com/mattpocock/skills) (MIT) | Griller, at start |
+| grill-me | [mattpocock/skills](https://github.com/mattpocock/skills) (MIT) | Griller, at start |
 | to-questionnaire, handoff, tdd, code-review | mattpocock/skills (MIT) | on demand; code-review at Reviewer start |
 | writing-plans, subagent-driven-development, verification-before-completion | [obra/superpowers](https://github.com/obra/superpowers) (MIT) | on demand |
 | change-artifacts, intake, impact-analysis, plan-format | this repo | stage agents, at start |
 
-grill-me's own file points to grilling, so both are vendored. Each vendored skill carries `SOURCE.md` (repo, path, commit, license) and the upstream `LICENSE`. Vendored files are not edited; harness rules live in the agent that loads the skill.
+Upstream, grill-me's file only points to the grilling skill, so the harness ships them as one skill named grill-me: grilling's process under grill-me's name. Each vendored skill carries `SOURCE.md` (repo, path, commit, license) and the upstream `LICENSE`. Vendored skill bodies are not edited; harness rules live in the agent that loads the skill.
 
 ## Check during the pilot
 

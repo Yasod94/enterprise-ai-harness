@@ -3,9 +3,9 @@ requires = ["hatchling>=1.24"]
 build-backend = "hatchling.build"
 
 [project]
-name = "change-harness"
+name = "enterprise-ai-harness"
 version = "0.3.0"
-description = "Build tool for the change-harness VS Code agent plugin: grill, impact, plan, approve, implement, verify."
+description = "Build tool for the enterprise-ai-harness VS Code agent plugin: grill, impact, plan, approve, implement, verify."
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = ["PyYAML>=6.0"]
@@ -14,11 +14,11 @@ dependencies = ["PyYAML>=6.0"]
 test = ["pytest>=8"]
 
 [project.scripts]
-change-harness = "change_harness.cli:main"
-harness = "change_harness.cli:main"
+enterprise-ai-harness = "enterprise_ai_harness.cli:main"
+harness = "enterprise_ai_harness.cli:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/change_harness"]
+packages = ["src/enterprise_ai_harness"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

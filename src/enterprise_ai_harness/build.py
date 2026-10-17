@@ -18,7 +18,7 @@ import stat
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from change_harness.config import CHECKER_AGENT, Config
+from enterprise_ai_harness.config import CHECKER_AGENT, Config
 
 PLUGIN_DIR = "plugin"
 AGENTS_DIR = f"{PLUGIN_DIR}/com.github.copilot/agents"
@@ -114,7 +114,7 @@ def next_stage(cfg: Config, stage: str) -> str | None:
 def render_frontmatter(cfg: Config, v: Variant) -> str:
     agent = cfg.agents[v.agent_id]
     lines = [
-        f"# Built by change-harness from sources/agents/{v.agent_id}.agent.md. Do not edit here.",
+        f"# Built by enterprise-ai-harness from sources/agents/{v.agent_id}.agent.md. Do not edit here.",
         f"name: {q(v.name)}",
         f"description: {q(agent.get('description', ''))}",
         f"tools: {yaml_list(cfg.tools_for(v.agent_id))}",

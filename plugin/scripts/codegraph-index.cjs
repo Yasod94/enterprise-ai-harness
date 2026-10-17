@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Code graph seed handling for change-harness.
+// Code graph seed handling for enterprise-ai-harness.
 //
 // The working index lives in .codegraph/ (local; CodeGraph ignores it in git).
 // A compressed snapshot of it, the seed, is committed in .codegraph-seed/ so a

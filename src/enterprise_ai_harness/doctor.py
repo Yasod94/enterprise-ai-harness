@@ -10,8 +10,8 @@ from dataclasses import dataclass
 
 import yaml
 
-from change_harness.build import build
-from change_harness.config import CONFIG_FILE, Config, ConfigError, has_placeholder, load
+from enterprise_ai_harness.build import build
+from enterprise_ai_harness.config import CONFIG_FILE, Config, ConfigError, has_placeholder, load
 
 TOOL_CAP = 128
 TOKENS_PER_TOOL = 250  # rough size of one tool definition in the prompt

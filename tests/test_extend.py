@@ -1,9 +1,9 @@
 import pytest
 import yaml
 
-from change_harness.cli import main
-from change_harness.config import load
-from change_harness.extend import ExtendError, add_server, add_skill, insert_entry, parse_github, rebind_capability
+from enterprise_ai_harness.cli import main
+from enterprise_ai_harness.config import load
+from enterprise_ai_harness.extend import ExtendError, add_server, add_skill, insert_entry, parse_github, rebind_capability
 
 
 def test_insert_entry_keeps_comments():
@@ -40,7 +40,7 @@ def test_add_server_with_stages_and_capability(harness):
                  "--tools", "describe_table", "--capability", "db.schema"])
     assert code == 0
     raw = (harness / "harness.yaml").read_text()
-    assert "# Team configuration for the change-harness" in raw  # comments survive
+    assert "# Team configuration for the enterprise-ai-harness" in raw  # comments survive
     cfg = load(harness)
     assert cfg.servers["inv-db"]["tools"] == ["describe_table"]
     assert cfg.capabilities["db.schema"]["bind"] == "inv-db"

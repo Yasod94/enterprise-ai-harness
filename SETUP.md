@@ -10,12 +10,12 @@ You need VS Code with GitHub Copilot signed in, Git, and Node.js 22.5 or later (
 
    ```json
    "chat.plugins.enabled": true,
-   "chat.plugins.marketplaces": ["<org>/change-harness"]
+   "chat.plugins.marketplaces": ["Yasod94/enterprise-ai-harness"]
    ```
 
    The marketplace entry also accepts a Git URL (`https://...` or `git@...`). If the repository is private, your normal Git credentials must be able to clone it.
 
-2. Open the Extensions view, search `@agentPlugins`, select **change-harness** and choose Install. You can also find it in the Chat view under the cog, Agent Customizations, Plugins.
+2. Open the Extensions view, search `@agentPlugins`, select **enterprise-ai-harness** and choose Install. You can also find it in the Chat view under the cog, Agent Customizations, Plugins.
 
 That installs the agents, skills, hook scripts and MCP server definitions. Nothing is copied into your repositories.
 
@@ -45,9 +45,9 @@ A service repo can prompt new joiners to install the plugin with one small file,
 ```json
 {
   "extraKnownMarketplaces": {
-    "change-harness": { "source": { "source": "github", "repo": "<org>/change-harness" } }
+    "enterprise-ai-harness": { "source": { "source": "github", "repo": "Yasod94/enterprise-ai-harness" } }
   },
-  "enabledPlugins": { "change-harness@change-harness": true }
+  "enabledPlugins": { "enterprise-ai-harness@enterprise-ai-harness": true }
 }
 ```
 
@@ -58,13 +58,13 @@ VS Code shows the recommendation the first time a chat message is sent in that w
 If your organization disables agent plugins, install the same files at user level instead:
 
 ```bash
-git clone https://github.com/<org>/change-harness
-cd change-harness
+git clone https://github.com/Yasod94/enterprise-ai-harness
+cd enterprise-ai-harness
 uv run harness install-user          # after a git pull, run it again to update
 uv run harness install-user --uninstall
 ```
 
-This writes agents to `~/.copilot/agents`, skills to `~/.copilot/skills`, the scripts to `~/.copilot/change-harness/scripts`, and merges the servers into your VS Code user `mcp.json` (servers you already have with the same name are kept). It records what it wrote, so `--uninstall` removes only those files and servers.
+This writes agents to `~/.copilot/agents`, skills to `~/.copilot/skills`, the scripts to `~/.copilot/enterprise-ai-harness/scripts`, and merges the servers into your VS Code user `mcp.json` (servers you already have with the same name are kept). It records what it wrote, so `--uninstall` removes only those files and servers.
 
 ### Troubleshooting
 

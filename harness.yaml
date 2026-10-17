@@ -1,4 +1,4 @@
-# Team configuration for the change-harness VS Code plugin.
+# Team configuration for the enterprise-ai-harness VS Code plugin.
 #
 # Edit this file (or run `harness add ...`), then `harness build` to regenerate
 # plugin/. Developers install the plugin once; nothing is added to service repos
@@ -9,13 +9,14 @@
 version: 1
 
 plugin:
-  name: change-harness
+  name: enterprise-ai-harness
   version: 0.3.0
   description: Copilot change workflow with a review after every stage, approval-gated code edits and swappable MCP tools.
-  repository: https://github.com/<org>/change-harness
+  repository: https://github.com/Yasod94/enterprise-ai-harness
+  owner: Yasod94
   license: MIT
   # If VS Code lists this plugin's MCP tools with a prefix (for example
-  # "change-harness.codegraph/..."), set that prefix here and rebuild.
+  # "enterprise-ai-harness.codegraph/..."), set that prefix here and rebuild.
   server_prefix: ""
 
 # Run files (.changes/<run-id>/) stay in the developer's clone by default and are
@@ -183,7 +184,7 @@ agents:
     builtin: [read, search, edit, agent]
     capabilities: [tickets.read, docs.search, code.graph, arch.graph]
     subagents: [component-scout]
-    skills: [change-artifacts, grill-me, grilling]
+    skills: [change-artifacts, grill-me]
     scope: grill
   impact-analyst:
     name: Impact Analyst
@@ -252,7 +253,7 @@ review:
 # Budgets per agent scope, counted by the hook. At the limit, further tool calls are
 # denied and the agent shows its review card. Type "extend" to add 50%.
 # Developers can override review modes and budgets for themselves in
-# ~/.copilot/change-harness.local.yaml.
+# ~/.copilot/enterprise-ai-harness.local.yaml.
 budgets:
   orchestrator: { tool_calls: 30 }
   check: { tool_calls: 20 }

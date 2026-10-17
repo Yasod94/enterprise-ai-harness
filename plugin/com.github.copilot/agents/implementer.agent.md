@@ -1,5 +1,5 @@
 ---
-# Built by change-harness from sources/agents/implementer.agent.md. Do not edit here.
+# Built by enterprise-ai-harness from sources/agents/implementer.agent.md. Do not edit here.
 name: "Implementer"
 description: "Runs the approved plan one task at a time, with tests after each task."
 tools: ['read', 'search', 'edit', 'execute', 'agent', 'todos', 'codegraph/*', 'ctx/*', 'extras-implement']

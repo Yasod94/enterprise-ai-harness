@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// change-harness hook for the VS Code Local agent harness.
+// enterprise-ai-harness hook for the VS Code Local agent harness.
 //
 // Wired as agent-scoped hooks in each harness agent's frontmatter (shipped in
 // the plugin), so it only runs while a harness agent is active:
@@ -79,7 +79,7 @@ function parseSimpleYaml(text) {
 function loadConfig(root) {
   let cfg = readJson(path.join(HOOK_DIR, 'config.json'), {});
   // Personal settings: ~/.copilot/<plugin>.local.yaml, then harness.local.yaml in the repo.
-  const personal = [path.join(os.homedir(), '.copilot', `${cfg.plugin || 'change-harness'}.local.yaml`),
+  const personal = [path.join(os.homedir(), '.copilot', `${cfg.plugin || 'enterprise-ai-harness'}.local.yaml`),
     path.join(root, 'harness.local.yaml')];
   for (const localFile of personal) {
     if (!fs.existsSync(localFile)) continue;
@@ -126,7 +126,7 @@ function ensureLocalExcludes(root, cfg) {
   const missing = wanted.filter((w) => !lines.includes(w));
   if (!missing.length) return;
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  const header = lines.includes('# change-harness') ? [] : ['# change-harness'];
+  const header = lines.includes('# enterprise-ai-harness') ? [] : ['# enterprise-ai-harness'];
   fs.appendFileSync(file, (text && !text.endsWith('\n') ? '\n' : '') + [...header, ...missing].join('\n') + '\n');
 }
 
@@ -673,6 +673,6 @@ try {
   main();
 } catch (err) {
   // A bug in the hook must not stop the agent: exit 1 is a non-blocking warning.
-  process.stderr.write(`change-harness hook error: ${err && err.stack || err}\n`);
+  process.stderr.write(`enterprise-ai-harness hook error: ${err && err.stack || err}\n`);
   process.exit(1);
 }

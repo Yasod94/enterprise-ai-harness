@@ -3,9 +3,9 @@ import json
 import pytest
 import yaml
 
-from change_harness.cli import main
-from change_harness.config import load
-from change_harness.install import _strip_jsonc, install_user
+from enterprise_ai_harness.cli import main
+from enterprise_ai_harness.config import load
+from enterprise_ai_harness.install import _strip_jsonc, install_user
 
 
 def test_strip_jsonc_keeps_strings():
@@ -22,12 +22,12 @@ def test_install_and_uninstall(harness, tmp_path):
     assert "kept your existing server github-ro" in " ".join(messages)
 
     agent = (copilot / "agents/griller.agent.md").read_text()
-    scripts = (copilot / "change-harness/scripts").as_posix()
+    scripts = (copilot / "enterprise-ai-harness/scripts").as_posix()
     hook = yaml.safe_load(agent.split("---")[1])["hooks"]["PreToolUse"][0]["command"]
     assert hook == f'node "{scripts}/harness-hook.cjs" pre-tool grill'
-    assert "${PLUGIN_ROOT}" not in agent and "(../skills/grilling/SKILL.md)" in agent
+    assert "${PLUGIN_ROOT}" not in agent and "(../skills/grill-me/SKILL.md)" in agent
     assert (copilot / "skills/grill-me/SKILL.md").exists()
-    assert (copilot / "change-harness/scripts/config.json").exists()
+    assert (copilot / "enterprise-ai-harness/scripts/config.json").exists()
 
     servers = json.loads((vscode / "mcp.json").read_text())["servers"]
     assert servers["github-ro"]["url"] == "https://mine" and "other" in servers
@@ -39,7 +39,7 @@ def test_install_and_uninstall(harness, tmp_path):
     servers = json.loads((vscode / "mcp.json").read_text())["servers"]
     assert set(servers) == {"github-ro", "other"}
     assert not (copilot / "agents").exists() and not (copilot / "skills").exists()
-    assert not (copilot / "change-harness/installed.json").exists()
+    assert not (copilot / "enterprise-ai-harness/installed.json").exists()
 
 
 def test_install_requires_build(harness, tmp_path):

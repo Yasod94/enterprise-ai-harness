@@ -23,7 +23,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/checkout@v4
         with:
-          repository: <org>/change-harness
+          repository: Yasod94/enterprise-ai-harness
           path: .harness-tmp
           # token: ${{ secrets.CHANGE_HARNESS_READ_TOKEN }}   # if the harness repo is private
       - name: Move the harness out of the workspace so it is not indexed

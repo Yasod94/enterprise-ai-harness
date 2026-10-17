@@ -1,5 +1,5 @@
 ---
-# Built by change-harness from sources/agents/reviewer.agent.md. Do not edit here.
+# Built by enterprise-ai-harness from sources/agents/reviewer.agent.md. Do not edit here.
 name: "Reviewer"
 description: "Checks the diff against the plan, runs the full test suite and opens the PR."
 tools: ['read', 'search', 'edit', 'execute', 'github-rw/create_pull_request', 'github-rw/update_pull_request', 'github-rw/add_issue_comment', 'atlassian/getAccessibleAtlassianResources', 'atlassian/getJiraIssue', 'atlassian/listJiraIssueTransitions', 'atlassian/transitionJiraIssue', 'atlassian/addOrEditJiraIssueComment', 'ctx/*', 'extras-verify']

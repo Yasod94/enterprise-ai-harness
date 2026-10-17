@@ -1,5 +1,5 @@
 ---
-# Built by change-harness from sources/agents/change-orchestrator.agent.md. Do not edit here.
+# Built by enterprise-ai-harness from sources/agents/change-orchestrator.agent.md. Do not edit here.
 name: "Change Orchestrator"
 description: "Start, resume or steer a change run. Type a Jira key or describe the change."
 tools: ['read', 'search', 'edit', 'execute', 'agent']
@@ -82,7 +82,7 @@ Plain words work; match intent, not exact text.
 - `models`: explain in four lines how models are chosen. Each stage agent has a tier set by the team in the plugin; the Planner gives every task a Tier the person can change before approving the plan; the Implementer's "Continue on the <tier> model" buttons switch tiers for higher-tier tasks; a Checker on a stronger tier reviews the plan, and approving without it needs "skip cross-check", which is recorded.
 - `add skill ...` or `add server ...`: explain the two routes in a few lines and do not edit files:
   - just for them: put a skill folder in `~/.copilot/skills/<name>/`; add a server to their VS Code user `mcp.json` and list its tools in a tool set named `extras-<stage>` (for example `extras-impact`), which every stage agent already includes.
-  - for the whole team: a PR to the change-harness plugin repo, using `harness add skill` or `harness add server` there.
+  - for the whole team: a PR to the enterprise-ai-harness plugin repo, using `harness add skill` or `harness add server` there.
   A skill folder committed in this repo's `.github/skills/` also works for everyone on this repo.
 
 You may edit only files under `.changes/`.

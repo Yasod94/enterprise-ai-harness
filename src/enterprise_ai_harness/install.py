@@ -15,8 +15,8 @@ import platform
 import shutil
 from pathlib import Path
 
-from change_harness.build import AGENTS_DIR, PLUGIN_DIR, SKILL_LINK_PREFIX, SKILLS_DIR, SCRIPTS_DIR
-from change_harness.config import Config
+from enterprise_ai_harness.build import AGENTS_DIR, PLUGIN_DIR, SKILL_LINK_PREFIX, SKILLS_DIR, SCRIPTS_DIR
+from enterprise_ai_harness.config import Config
 
 
 def default_vscode_user_dir() -> Path:

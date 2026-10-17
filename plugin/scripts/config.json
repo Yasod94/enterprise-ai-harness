@@ -1,5 +1,5 @@
 {
-  "plugin": "change-harness",
+  "plugin": "enterprise-ai-harness",
   "version": "0.3.0",
   "stages": [
     "intake",

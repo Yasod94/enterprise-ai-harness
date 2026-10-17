@@ -10,8 +10,8 @@ import subprocess
 
 import pytest
 
-from change_harness.build import build
-from change_harness.config import load
+from enterprise_ai_harness.build import build
+from enterprise_ai_harness.config import load
 from conftest import NODE, git, run_hook
 
 pytestmark = pytest.mark.skipif(NODE is None or os.environ.get("CODEGRAPH_E2E") != "1",

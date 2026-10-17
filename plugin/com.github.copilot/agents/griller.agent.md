@@ -1,5 +1,5 @@
 ---
-# Built by change-harness from sources/agents/griller.agent.md. Do not edit here.
+# Built by enterprise-ai-harness from sources/agents/griller.agent.md. Do not edit here.
 name: "Griller"
 description: "Clarifies the requirement with grill-me before any analysis."
 tools: ['read', 'search', 'edit', 'agent', 'atlassian/getAccessibleAtlassianResources', 'atlassian/getJiraIssue', 'atlassian/searchJiraIssuesUsingJql', 'atlassian/listJiraIssueRemoteIssueLinks', 'atlassian/searchConfluence', 'atlassian/getConfluenceContent', 'codegraph/*', 'extras-grill']
@@ -43,9 +43,8 @@ Before you start, read and follow these skills:
 
 - [change-artifacts](../../skills/change-artifacts/SKILL.md)
 - [grill-me](../../skills/grill-me/SKILL.md)
-- [grilling](../../skills/grilling/SKILL.md)
 
-grill-me hands off to the grilling skill; follow grilling's process (rounds over the frontier, a recommended answer for each question). These harness rules apply on top:
+Follow grill-me's process: rounds over the frontier of open decisions, with a recommended answer for each question. These harness rules apply on top:
 
 1. Read `.changes/current`, then `requirement.md` and, if it exists, `clarifications.md`. Start the tree from the requirement's Open questions.
 2. Cover behavior, data and schema, integrations and events (Kafka topics, MQ), volume and latency, rollout (feature flag, backfill) and testing.

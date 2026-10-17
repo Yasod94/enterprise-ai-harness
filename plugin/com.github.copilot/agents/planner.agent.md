@@ -1,5 +1,5 @@
 ---
-# Built by change-harness from sources/agents/planner.agent.md. Do not edit here.
+# Built by enterprise-ai-harness from sources/agents/planner.agent.md. Do not edit here.
 name: "Planner"
 description: "Writes plan.md, the per-component changes and task list, from the approved impact."
 tools: ['read', 'search', 'edit', 'codegraph/*', 'atlassian/getAccessibleAtlassianResources', 'atlassian/searchConfluence', 'atlassian/getConfluenceContent', 'extras-plan']

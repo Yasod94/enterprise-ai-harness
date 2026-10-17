@@ -6,9 +6,9 @@ import re
 import pytest
 import yaml
 
-from change_harness.build import AGENTS_DIR, build
-from change_harness.config import ConfigError, load
-from change_harness.doctor import check
+from enterprise_ai_harness.build import AGENTS_DIR, build
+from enterprise_ai_harness.config import ConfigError, load
+from enterprise_ai_harness.doctor import check
 from conftest import NODE, run_hook, start_run
 
 DEEP = "Claude Opus 5.5 (copilot)"

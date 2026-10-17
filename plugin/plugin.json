@@ -1,9 +1,9 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
-  "name": "change-harness",
+  "name": "enterprise-ai-harness",
   "version": "0.3.0",
   "description": "Copilot change workflow with a review after every stage, approval-gated code edits and swappable MCP tools.",
-  "repository": "https://github.com/<org>/change-harness",
+  "repository": "https://github.com/Yasod94/enterprise-ai-harness",
   "license": "MIT",
   "keywords": [
     "copilot",

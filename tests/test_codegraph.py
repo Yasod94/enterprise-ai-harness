@@ -6,8 +6,8 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from change_harness.build import build
-from change_harness.config import load
+from enterprise_ai_harness.build import build
+from enterprise_ai_harness.config import load
 from conftest import NODE, git, make_index, run_hook, start_run
 
 pytestmark = pytest.mark.skipif(NODE is None, reason="node is required for code graph tests")

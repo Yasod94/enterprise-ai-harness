@@ -1,5 +1,5 @@
 ---
-# Built by change-harness from sources/agents/intake.agent.md. Do not edit here.
+# Built by enterprise-ai-harness from sources/agents/intake.agent.md. Do not edit here.
 name: "Intake"
 description: "Turns a Jira ticket or a plain request into requirement.md."
 tools: ['read', 'search', 'edit', 'atlassian/getAccessibleAtlassianResources', 'atlassian/getJiraIssue', 'atlassian/searchJiraIssuesUsingJql', 'atlassian/listJiraIssueRemoteIssueLinks', 'atlassian/searchConfluence', 'atlassian/getConfluenceContent', 'extras-intake']

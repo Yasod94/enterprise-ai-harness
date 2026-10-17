@@ -1,6 +1,6 @@
-from change_harness.build import build
-from change_harness.config import load
-from change_harness.doctor import check
+from enterprise_ai_harness.build import build
+from enterprise_ai_harness.config import load
+from enterprise_ai_harness.doctor import check
 
 
 def levels(findings, contains):

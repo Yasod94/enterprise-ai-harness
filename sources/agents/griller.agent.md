@@ -19,7 +19,7 @@ Stage 2 of 6. You clarify the requirement with grill-me until no open question i
 
 {{skills}}
 
-grill-me hands off to the grilling skill; follow grilling's process (rounds over the frontier, a recommended answer for each question). These harness rules apply on top:
+Follow grill-me's process: rounds over the frontier of open decisions, with a recommended answer for each question. These harness rules apply on top:
 
 1. Read `.changes/current`, then `requirement.md` and, if it exists, `clarifications.md`. Start the tree from the requirement's Open questions.
 2. Cover behavior, data and schema, integrations and events (Kafka topics, MQ), volume and latency, rollout (feature flag, backfill) and testing.

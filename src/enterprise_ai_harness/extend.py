@@ -11,7 +11,7 @@ from pathlib import Path
 
 import yaml
 
-from change_harness.config import CONFIG_FILE, Config
+from enterprise_ai_harness.config import CONFIG_FILE, Config
 
 GITHUB_RE = re.compile(r"^(?:github:|https://github\.com/)?([\w.-]+)/([\w.-]+?)(?:\.git)?(?:@([\w./-]+))?$")
 
@@ -120,7 +120,7 @@ def vendor_github_skill(dest: Path, owner: str, name: str, skill: str | None, re
             f"- Path: {rel}\n"
             f"- Commit: {commit}\n"
             f"- License: {license_line}. Full text in LICENSE next to this file.\n"
-            f"- Vendored: {date.today().isoformat()} by change-harness. Do not edit; put harness rules in the agent that loads it.\n",
+            f"- Vendored: {date.today().isoformat()} by enterprise-ai-harness. Do not edit; put harness rules in the agent that loads it.\n",
             encoding="utf-8",
         )
         return commit

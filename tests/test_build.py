@@ -2,8 +2,8 @@ import json
 
 import yaml
 
-from change_harness.build import AGENTS_DIR, build
-from change_harness.config import load
+from enterprise_ai_harness.build import AGENTS_DIR, build
+from enterprise_ai_harness.config import load
 
 
 def frontmatter(path):
@@ -13,10 +13,10 @@ def frontmatter(path):
 def test_plugin_layout(harness):
     p = harness / "plugin"
     manifest = json.loads((p / "plugin.json").read_text())
-    assert manifest["$schema"].endswith("/1.0.0/plugin.schema.json") and manifest["name"] == "change-harness"
+    assert manifest["$schema"].endswith("/1.0.0/plugin.schema.json") and manifest["name"] == "enterprise-ai-harness"
     # 9 single agents + 3 Task Runners (one per tier) + Plan and Impact Checkers
     assert len(list((harness / AGENTS_DIR).glob("*.agent.md"))) == 14
-    for skill in ("grill-me", "grilling", "change-artifacts", "impact-analysis", "plan-format", "tdd"):
+    for skill in ("grill-me", "change-artifacts", "impact-analysis", "plan-format", "tdd"):
         assert (p / "skills" / skill / "SKILL.md").exists()
     assert (p / "scripts/harness-hook.cjs").exists() and (p / "scripts/codegraph-index.cjs").exists()
     mcp = json.loads((p / "mcp.json").read_text())
@@ -24,7 +24,7 @@ def test_plugin_layout(harness):
     assert "orders-db-ro" not in mcp["mcpServers"]
     assert mcp["mcpServers"]["codegraph"]["env"]["DO_NOT_TRACK"] == "1"
     market = json.loads((harness / ".github/plugin/marketplace.json").read_text())
-    assert market["plugins"][0] == {"name": "change-harness", "source": "plugin",
+    assert market["plugins"][0] == {"name": "enterprise-ai-harness", "source": "plugin",
                                     "description": manifest["description"], "version": manifest["version"]}
 
 
@@ -36,7 +36,7 @@ def test_agent_frontmatter_hooks_use_plugin_root(harness):
     assert hook["command"] == 'node "${PLUGIN_ROOT}/scripts/harness-hook.cjs" pre-tool grill'
     assert fm["hooks"]["UserPromptSubmit"][0]["timeout"] == 120
     body = (harness / AGENTS_DIR / "griller.agent.md").read_text()
-    assert "(../../skills/grilling/SKILL.md)" in body and "{{" not in body
+    assert "(../../skills/grill-me/SKILL.md)" in body and "{{" not in body
 
 
 def test_all_handoff_and_subagent_targets_exist(harness):
@@ -75,12 +75,12 @@ def test_placeholder_server_falls_back_to_alt(harness):
 
 
 def test_server_prefix_is_applied(harness):
-    text = (harness / "harness.yaml").read_text().replace('server_prefix: ""', 'server_prefix: "change-harness."')
+    text = (harness / "harness.yaml").read_text().replace('server_prefix: ""', 'server_prefix: "enterprise-ai-harness."')
     (harness / "harness.yaml").write_text(text)
     cfg = load(harness)
     build(cfg)
     fm = frontmatter(harness / AGENTS_DIR / "griller.agent.md")
-    assert "change-harness.codegraph/*" in fm["tools"]
+    assert "enterprise-ai-harness.codegraph/*" in fm["tools"]
     assert cfg.estimate_tool_count("griller") == load(harness).estimate_tool_count("griller")
 
 

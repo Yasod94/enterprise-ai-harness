@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from change_harness.build import build
-from change_harness.config import load
+from enterprise_ai_harness.build import build
+from enterprise_ai_harness.config import load
 
 REPO = Path(__file__).resolve().parents[1]
 NODE = shutil.which("node")

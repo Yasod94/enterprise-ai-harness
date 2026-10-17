@@ -67,7 +67,7 @@ class Config:
 
     @property
     def plugin_name(self) -> str:
-        return self.plugin.get("name", "change-harness")
+        return self.plugin.get("name", "enterprise-ai-harness")
 
     @property
     def servers(self) -> dict[str, dict]:

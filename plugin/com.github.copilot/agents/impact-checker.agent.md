@@ -1,5 +1,5 @@
 ---
-# Built by change-harness from sources/agents/cross-checker.agent.md. Do not edit here.
+# Built by enterprise-ai-harness from sources/agents/cross-checker.agent.md. Do not edit here.
 name: "Impact Checker"
 description: "Reviews a stage's artifacts on a stronger model before the person approves them."
 tools: ['read', 'search', 'edit', 'codegraph/*', 'atlassian/getAccessibleAtlassianResources', 'atlassian/searchConfluence', 'atlassian/getConfluenceContent', 'github-ro/get_file_contents', 'github-ro/list_commits', 'github-ro/get_commit', 'github-ro/list_pull_requests', 'github-ro/get_pull_request', 'github-ro/search_code']

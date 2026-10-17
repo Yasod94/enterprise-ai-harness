@@ -222,7 +222,7 @@ def test_personal_settings_from_home_dir(ctx, tmp_path):
     run = start_run(repo)
     home = tmp_path / "home"
     (home / ".copilot").mkdir(parents=True)
-    (home / ".copilot/change-harness.local.yaml").write_text("budgets:\n  intake:\n    tool_calls: 1\n")
+    (home / ".copilot/enterprise-ai-harness.local.yaml").write_text("budgets:\n  intake:\n    tool_calls: 1\n")
     (run / ".usage.json").write_text(json.dumps({"intake": {"tool_calls": 1, "output_bytes": 0}}))
     _, out, _ = run_hook(ctx, "pre-tool", "intake", {"tool_name": "readFile", "tool_input": {}},
                          env={"HOME": str(home), "USERPROFILE": str(home)})

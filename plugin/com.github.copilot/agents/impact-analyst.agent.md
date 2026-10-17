@@ -1,5 +1,5 @@
 ---
-# Built by change-harness from sources/agents/impact-analyst.agent.md. Do not edit here.
+# Built by enterprise-ai-harness from sources/agents/impact-analyst.agent.md. Do not edit here.
 name: "Impact Analyst"
 description: "Finds the components a change touches, with evidence, and writes impact.md and impact.json."
 tools: ['read', 'search', 'edit', 'agent', 'codegraph/*', 'atlassian/getAccessibleAtlassianResources', 'atlassian/searchConfluence', 'atlassian/getConfluenceContent', 'ctx/*', 'extras-impact']

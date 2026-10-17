@@ -1,5 +1,5 @@
 ---
-# Built by change-harness from sources/agents/task-runner.agent.md. Do not edit here.
+# Built by enterprise-ai-harness from sources/agents/task-runner.agent.md. Do not edit here.
 name: "Task Runner (fast)"
 description: "Implements exactly one plan task with the smallest change that passes its check."
 tools: ['read', 'search', 'edit', 'execute', 'codegraph/*', 'ctx/*', 'extras-implement']

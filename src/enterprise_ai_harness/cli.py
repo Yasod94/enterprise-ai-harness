@@ -11,12 +11,12 @@ import json
 import sys
 from pathlib import Path
 
-from change_harness import __version__
-from change_harness.build import BuildReport, build
-from change_harness.config import ConfigError, load
-from change_harness.doctor import check, summarize
-from change_harness.extend import ExtendError, add_server, add_skill
-from change_harness.install import install_user
+from enterprise_ai_harness import __version__
+from enterprise_ai_harness.build import BuildReport, build
+from enterprise_ai_harness.config import ConfigError, load
+from enterprise_ai_harness.doctor import check, summarize
+from enterprise_ai_harness.extend import ExtendError, add_server, add_skill
+from enterprise_ai_harness.install import install_user
 
 
 def _csv(value: str | None) -> list[str] | None:
@@ -88,8 +88,8 @@ def cmd_status(args) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="harness", description="Build and check the change-harness plugin")
-    p.add_argument("--version", action="version", version=f"change-harness {__version__}")
+    p = argparse.ArgumentParser(prog="harness", description="Build and check the enterprise-ai-harness plugin")
+    p.add_argument("--version", action="version", version=f"enterprise-ai-harness {__version__}")
     p.add_argument("--root", type=Path, default=None, help="harness repo root (default: found from the current folder)")
     sub = p.add_subparsers(dest="cmd", required=True)
 
