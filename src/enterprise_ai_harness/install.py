@@ -73,16 +73,27 @@ def install_user(cfg: Config, copilot_dir: Path | None = None, vscode_user_dir: 
         if d.is_dir() and not any(d.iterdir()):  # folders still holding the developer's own files stay
             d.rmdir()
     mcp_path = vscode / "mcp.json"
-    mcp = json.loads(_strip_jsonc(mcp_path.read_text(encoding="utf-8"))) if mcp_path.exists() else {}
+    original = mcp_path.read_text(encoding="utf-8") if mcp_path.exists() else None
+    mcp = json.loads(_strip_jsonc(original)) if original and original.strip() else {}
     servers = mcp.setdefault("servers", {})
     for name in previous["servers"]:
         servers.pop(name, None)
-    if uninstall:
+
+    def save_mcp() -> None:
+        # The file is rewritten as plain JSON; keep the person's copy once if it had comments.
+        backup = mcp_path.with_name("mcp.json.before-harness")
+        if original is not None and _strip_jsonc(original) != original and not backup.exists():
+            backup.write_text(original, encoding="utf-8")
+            messages.append(f"{mcp_path} had comments; the original is saved as {backup.name}")
         mcp_path.parent.mkdir(parents=True, exist_ok=True)
         mcp_path.write_text(json.dumps(mcp, indent=2) + "\n", encoding="utf-8")
+
+    if uninstall:
+        if original is not None:
+            save_mcp()
         if manifest_path.exists():
             manifest_path.unlink()
-        return [f"removed {len(previous['files'])} files and {len(previous['servers'])} servers"]
+        return [f"removed {len(previous['files'])} files and {len(previous['servers'])} servers", *messages]
 
     plugin = cfg.root / PLUGIN_DIR
     if not (plugin / "plugin.json").exists():
@@ -115,8 +126,7 @@ def install_user(cfg: Config, copilot_dir: Path | None = None, vscode_user_dir: 
             entry = {**entry, "type": "http"}  # VS Code's user mcp.json name for the same transport
         servers[name] = entry
         added.append(name)
-    mcp_path.parent.mkdir(parents=True, exist_ok=True)
-    mcp_path.write_text(json.dumps(mcp, indent=2) + "\n", encoding="utf-8")
+    save_mcp()
     home.mkdir(parents=True, exist_ok=True)
     manifest_path.write_text(json.dumps({"files": written, "servers": added}, indent=2) + "\n")
     if shutil.which("node") is None:

@@ -10,7 +10,7 @@ version: 1
 
 plugin:
   name: enterprise-ai-harness
-  version: 0.4.1
+  version: 0.4.2
   description: Copilot change workflow with a review after every stage, approval-gated code edits and swappable MCP tools.
   repository: https://github.com/Yasod94/enterprise-ai-harness
   owner: Yasod94
@@ -124,7 +124,7 @@ capabilities:
   repo.read:
     bind: github-ro
     tools: [get_file_contents, list_commits, get_commit, list_pull_requests, pull_request_read, search_code]
-    fallback: Use git log, git show and git blame in the terminal.
+    fallback: Use git log, git show and git blame in the terminal, or read the files in the workspace.
   repo.write:
     bind: github-rw
     fallback: Give the person a PR title and body to paste.

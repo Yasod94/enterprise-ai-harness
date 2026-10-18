@@ -59,7 +59,7 @@ Give exactly one fix per failure. Mark a capability that is off by design and us
 | arch.graph | not configured (kb) | Use docs.search and the code itself, and say the architecture graph was unavailable. |
 | code.graph | `codegraph/*` | Use search/codebase, search/usages and read the files directly. |
 | db.schema | not configured (orders-db-ro) | Read the schema migration files in the repo (for example db/migration, flyway, liquibase). |
-| repo.read | `github-ro/get_file_contents`, `github-ro/list_commits`, `github-ro/get_commit`, `github-ro/list_pull_requests`, `github-ro/pull_request_read`, `github-ro/search_code` | Use git log, git show and git blame in the terminal. |
+| repo.read | `github-ro/get_file_contents`, `github-ro/list_commits`, `github-ro/get_commit`, `github-ro/list_pull_requests`, `github-ro/pull_request_read`, `github-ro/search_code` | Use git log, git show and git blame in the terminal, or read the files in the workspace. |
 | output.sandbox | `ctx/*` | Pipe long command output through tail or grep before reading it. |
 
 Setup commands (run in the terminal; it asks for approval):

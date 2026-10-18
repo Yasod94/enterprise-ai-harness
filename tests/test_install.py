@@ -20,6 +20,7 @@ def test_install_and_uninstall(harness, tmp_path):
                                      ' "other": {"command": "x"}},\n}\n')
     messages = install_user(load(harness), copilot, vscode)
     assert "kept your existing server github-ro" in " ".join(messages)
+    assert "// mine" in (vscode / "mcp.json.before-harness").read_text()  # comments kept in a backup
 
     agent = (copilot / "agents/griller.agent.md").read_text()
     scripts = (copilot / "enterprise-ai-harness/scripts").as_posix()
@@ -54,3 +55,26 @@ def test_cli_install_user(harness, tmp_path):
     code = main(["--root", str(harness), "install-user", "--copilot-dir", str(tmp_path / "c"),
                  "--vscode-user-dir", str(tmp_path / "v")])
     assert code == 0 and (tmp_path / "c/agents/change-orchestrator.agent.md").exists()
+
+
+def test_uninstall_without_mcp_json_creates_nothing(harness, tmp_path):
+    copilot, vscode = tmp_path / "copilot", tmp_path / "vscode"
+    install_user(load(harness), copilot, vscode)
+    (vscode / "mcp.json").unlink()
+    install_user(load(harness), copilot, vscode, uninstall=True)
+    assert not (vscode / "mcp.json").exists()
+
+
+@pytest.mark.skipif(__import__("shutil").which("node") is None, reason="node is required")
+def test_installed_hook_command_runs(harness, service, tmp_path):
+    """The hook command written into a user-level agent runs as a shell command and guards edits."""
+    import subprocess
+    copilot = tmp_path / "copilot"
+    install_user(load(harness), copilot, tmp_path / "vscode")
+    agent = (copilot / "agents/planner.agent.md").read_text()
+    command = yaml.safe_load(agent.split("---")[1])["hooks"]["PreToolUse"][0]["command"]
+    event = {"cwd": str(service), "tool_name": "create_file",
+             "tool_input": {"filePath": str(service / "src/OrderPublisher.java"), "content": "x"}}
+    proc = subprocess.run(command, shell=True, input=json.dumps(event), capture_output=True, text=True, cwd=service)
+    assert proc.returncode == 0, proc.stderr
+    assert json.loads(proc.stdout)["hookSpecificOutput"]["permissionDecision"] == "deny"

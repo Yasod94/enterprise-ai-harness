@@ -73,4 +73,4 @@ Edit only `impact-check.md` in the run folder. The stage agent applies any chang
 | code.graph | `codegraph/*` | Use search/codebase, search/usages and read the files directly. |
 | arch.graph | not configured (kb) | Use docs.search and the code itself, and say the architecture graph was unavailable. |
 | docs.search | `atlassian/getAccessibleAtlassianResources`, `atlassian/searchConfluence`, `atlassian/getConfluenceContent` (standing in for kb) | Ask the person for page links. |
-| repo.read | `github-ro/get_file_contents`, `github-ro/list_commits`, `github-ro/get_commit`, `github-ro/list_pull_requests`, `github-ro/pull_request_read`, `github-ro/search_code` | Use git log, git show and git blame in the terminal. |
+| repo.read | `github-ro/get_file_contents`, `github-ro/list_commits`, `github-ro/get_commit`, `github-ro/list_pull_requests`, `github-ro/pull_request_read`, `github-ro/search_code` | Use git log, git show and git blame in the terminal, or read the files in the workspace. |

@@ -50,9 +50,9 @@ A small change (a typo, a log line, a one-file fix) can take the short path: tel
 Commands that change the run (`back to <stage>`, `stop`, `resume <run-id>`) take effect through the hook only when the person's whole message is the command. If they ask in other words ("could we redo the plan?"), tell them the exact words to type. `status`, `help`, `models` and the add commands are yours to answer in any wording.
 
 - `status`: read `.ai-harness/current` and its `state.json`. Show stage, its status, approvals so far, and usage against budget for the current stage. Five lines.
-- `resume <run-id>`: write it to `.ai-harness/current`, check out its branch, show `status`, and name the button for its stage. The hook also lifts a pause on that run.
+- `resume <run-id>`: the hook makes that run the active one (it writes `.ai-harness/current`) and lifts a pause on it. Check out its branch, show `status`, and name the button for its stage. If the hook did not report "Resumed run", the run folder is missing or broken: say what the hook reported.
 - `back to <stage>`: the hook moves the run back and clears that stage's approval and later ones. Confirm what it reported, then name the button for that stage.
-- `stop`: the hook pauses the run, and harness agents stop running tools until `resume <run-id>`. Say the run is saved and how to resume it.
+- `stop`: the hook pauses the run this chat works on (it names it), and harness agents stop running tools on it until `resume <run-id>`. Say the run is saved and how to resume it.
 - `help`: list these commands and the buttons in six lines.
 - `save code graph`: the hook syncs the index and writes the seed to `.codegraph-seed/`, and reports the size. If the person asks, commit `.codegraph-seed/` on its own: "Update code graph seed".
 - `models`: explain in four lines how models are chosen. Each stage agent has a tier set by the team in the plugin; the Planner gives every task a Tier the person can change before approving the plan; the Implementer's "Continue on the <tier> model" buttons switch tiers for higher-tier tasks; a Checker on a stronger tier reviews the plan, and approving without it needs "Approve and skip the cross-check", which is recorded.

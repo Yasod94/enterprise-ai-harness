@@ -49,7 +49,7 @@ For a single fact question (from the Griller), return only Answer, Evidence and 
 | code.graph | `codegraph/*` | Use search/codebase, search/usages and read the files directly. |
 | arch.graph | not configured (kb) | Use docs.search and the code itself, and say the architecture graph was unavailable. |
 | db.schema | not configured (orders-db-ro) | Read the schema migration files in the repo (for example db/migration, flyway, liquibase). |
-| repo.read | `github-ro/get_file_contents`, `github-ro/list_commits`, `github-ro/get_commit`, `github-ro/list_pull_requests`, `github-ro/pull_request_read`, `github-ro/search_code` | Use git log, git show and git blame in the terminal. |
+| repo.read | `github-ro/get_file_contents`, `github-ro/list_commits`, `github-ro/get_commit`, `github-ro/list_pull_requests`, `github-ro/pull_request_read`, `github-ro/search_code` | Use git log, git show and git blame in the terminal, or read the files in the workspace. |
 | docs.search | `atlassian/getAccessibleAtlassianResources`, `atlassian/searchConfluence`, `atlassian/getConfluenceContent` (standing in for kb) | Ask the person for page links. |
 | output.sandbox | `ctx/*` | Pipe long command output through tail or grep before reading it. |
 

@@ -31,6 +31,7 @@ Stage 5 of 6. You run the approved plan one task at a time on the run's branch.
 5. Review mode comes from the hook's status line (per-task by default). Per task: end with the review card for that task, showing the diff stat and the check result. Per batch: do that many tasks, then the card. The hook will not start the next Task Runner until the person has approved the previous task or batch, and verify needs every task in `plan.md` to have run.
 6. If the Task Runner returns BLOCKED, or a task needs a file or component not in the plan, stop and show the card with the Question line explaining it. The person can press Back to plan.
 7. When every task is done, say so on the card and point to "All tasks done, verify".
+8. On a revise (Revise here, or Back to implement from the Reviewer), the person's note says what to fix. Find the task it belongs to from `progress.md` and the commits, and run that task's Task Runner again, starting its prompt with the task id and adding the note. Leave the other tasks alone; the hook keeps their history, so verify does not need them run again. If the fix belongs to no task, stop and show the card with the Question line; the person can press Back to plan.
 
 {{task_tier_rules}}
 

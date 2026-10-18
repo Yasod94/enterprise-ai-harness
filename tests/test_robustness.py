@@ -482,3 +482,98 @@ def test_harness_check_tool_calls_refresh_the_hook_marker(harness, service):
     marker.write_text("2000-01-01T00:00:00.000Z\n")
     pre(harness, service, "check", "run_in_terminal", {"command": "node -e \"console.log(1)\""})
     assert marker.read_text().startswith("20") and not marker.read_text().startswith("2000")
+
+
+# ---------- third pass: tasks, notebook cells, file-writing MCP tools ----------
+
+def test_vscode_tasks_and_notebook_cells_are_guarded(harness, service):
+    start_run(service)
+    out = pre(harness, service, "verify", "run_task", {"workspaceFolder": str(service), "id": "shell: build"})
+    assert decision(out) == "ask" and "cannot inspect" in reason(out)
+    out = pre(harness, service, "verify", "create_and_run_task",
+              {"workspaceFolder": str(service), "task": {"label": "x", "type": "shell", "command": "rm", "args": ["-rf", "src"]}})
+    assert decision(out) == "ask"
+    out = pre(harness, service, "verify", "create_and_run_task",
+              {"workspaceFolder": str(service), "task": {"label": "t", "type": "shell", "command": "./gradlew", "args": ["test"]}})
+    assert out is None, reason(out)
+    assert decision(pre(harness, service, "grill", "run_notebook_cell", {"filePath": "a.ipynb", "cellId": "c1"})) == "ask"
+    out = pre(harness, service, "implement-task", "run_task", {"workspaceFolder": str(service), "id": "build"})
+    assert decision(out) == "deny" and "not approved" in reason(out)
+
+
+def test_file_writing_mcp_tools_are_edits(harness, service):
+    start_run(service)
+    out = pre(harness, service, "grill", "mcp_filesystem_write_file", {"path": str(service / "src/OrderPublisher.java"), "content": "x"})
+    assert decision(out) == "deny"
+    out = pre(harness, service, "grill", "mcp_filesystem_write_file", {"path": str(service / ".ai-harness/ABC-123/notes.md"), "content": "x"})
+    assert out is None, reason(out)
+    out = pre(harness, service, "verify", "mcp_atlassian_addOrEditJiraIssueComment", {"issueIdOrKey": "ABC-123", "commentBody": "PR"})
+    assert out is None, reason(out)
+
+
+def test_extended_length_windows_paths_are_inside_the_workspace(harness, service):
+    import os
+    start_run(service)
+    if os.name != "nt":
+        pytest.skip("Windows path forms")
+    p = "\\\\?\\" + str(service / "src/OrderPublisher.java")
+    assert decision(pre(harness, service, "grill", "create_file", {"filePath": p, "content": "x"})) == "deny"
+
+
+GUARD_READS = [
+    "git diff main...HEAD -- src", "rg -n 'publish\\(' src", 'grep -rn "a<b" src', "ls -la | sort -k5 -n",
+    "./gradlew test --tests 'OrderPublisherTest' 2>&1 | tail -n 40", "pytest -q 2>&1 | tail -5", "dotnet test --no-build",
+    "jq '.components[] | select(.confidence == \"low\")' .ai-harness/ABC-123/impact.json", "Get-Content src/A.java | Select-String 'x'",
+    "git show HEAD:src/A.java > /dev/null", "python3 -c 'import json;print(json.load(open(\"package.json\"))[\"name\"])'",
+    "git push -u origin HEAD", "diff <(sort a) <(sort b)", "curl -s --write-out '%{http_code}' http://x", "git commit --fixup HEAD",
+    "gofmt -l .", "prettier --check src", "git checkout main",
+]
+GUARD_WRITES = [
+    "echo x>src/A.java", "git checkout -- src/A.java", "git reset --hard HEAD~1", "git clean -fd", "perl -pi -e 's/a/b/' src/A.java",
+    "tee src/A.java < /dev/null", "Set-Content src/A.java x", "Remove-Item -Recurse src", "cat > src/A.java <<EOF\nx\nEOF",
+    "npx prettier --write src", "eslint --fix src", "./gradlew spotlessApply", "gofmt -w .", "tar -xzf a.tgz -C src",
+    "bash -c 'rm -rf src'", "find src -type f -delete", "2>err.log ./gradlew test", "echo x >| src/A.java",
+    "ruby -e \"File.write('src/A.java','x')\"", "deno eval \"Deno.writeTextFileSync('src/A.java','x')\"",
+]
+
+
+def test_command_guard_on_common_commands(harness, service):
+    run = start_run(service)
+    for command in GUARD_READS + GUARD_WRITES:
+        (run / ".usage.json").unlink(missing_ok=True)
+        got = decision(pre(harness, service, "verify", "run_in_terminal", {"command": command}))
+        assert got == (None if command in GUARD_READS else "ask"), command
+
+
+def test_approved_artifacts_are_locked_until_revised(harness, service):
+    run = start_run(service)
+    approve_until(harness, service, run, "implement")
+    for scope, name in (("plan", "plan.md"), ("implement", "plan.md"), ("implement-task", "requirement.md"), ("grill", "impact.json")):
+        out = pre(harness, service, scope, "replace_string_in_file",
+                  {"filePath": str(run / name), "oldString": "a", "newString": "b"})
+        assert decision(out) == "deny" and "back to" in reason(out), (scope, name)
+    assert pre(harness, service, "implement", "create_file", {"filePath": str(run / "progress.md"), "content": "p"}) is None
+    code, _, err = prompt(harness, service, "implement", "back to plan")
+    assert code == 0, err
+    assert pre(harness, service, "plan", "replace_string_in_file",
+               {"filePath": str(run / "plan.md"), "oldString": "a", "newString": "b"}) is None
+
+
+def test_pressing_an_old_approve_button_again_changes_nothing(harness, service):
+    run = start_run(service)
+    approve_until(harness, service, run, "implement")
+    out = pre(harness, service, "implement", "runSubagent",
+              {"agentName": "Task Runner (standard)", "prompt": "T1: config", "description": "T1"})
+    assert out is None, reason(out)
+    before = state(run)
+    code, out, err = prompt(harness, service, "implement", "[harness:approve plan] skip cross-check. Approved again.")
+    assert code == 0, err
+    assert "already approved and unchanged" in out["hookSpecificOutput"]["additionalContext"]
+    after = state(run)
+    assert after["tasks_dispatched"] == ["T1"] and after["approvals"] == before["approvals"] and after["stage"] == "implement"
+
+
+def test_tool_input_sent_as_a_json_string(harness, service):
+    start_run(service)
+    payload = json.dumps({"filePath": str(service / "src/OrderPublisher.java"), "content": "x"})
+    assert decision(pre(harness, service, "grill", "create_file", payload)) == "deny"

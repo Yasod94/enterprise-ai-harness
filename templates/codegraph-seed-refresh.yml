@@ -2,6 +2,8 @@
 # code graph seed from the default branch once a week, as its only writer.
 # Pair it with `seed_refresh: manual` in the harness so change PRs stop
 # refreshing the seed and seed conflicts between open PRs go away.
+# In a monorepo, set SERVICE_DIR to the folder developers open in VS Code
+# (one copy of this job per service folder).
 name: Refresh code graph seed
 
 on:
@@ -19,6 +21,7 @@ jobs:
     env:
       CODEGRAPH: npx -y @colbymchenry/codegraph@1.6.1   # keep in step with harness.yaml
       DO_NOT_TRACK: "1"
+      SERVICE_DIR: .          # e.g. services/orders in a monorepo
     steps:
       - uses: actions/checkout@v4
       - uses: actions/checkout@v4
@@ -32,15 +35,17 @@ jobs:
         with:
           node-version: 22
       - name: Update the index
+        working-directory: ${{ env.SERVICE_DIR }}
         run: |
           node "$RUNNER_TEMP/harness/plugin/scripts/codegraph-index.cjs" restore .
           if [ -f .codegraph/codegraph.db ]; then $CODEGRAPH sync --quiet; else $CODEGRAPH init --yes; fi
       - name: Save the seed
+        working-directory: ${{ env.SERVICE_DIR }}
         run: node "$RUNNER_TEMP/harness/plugin/scripts/codegraph-index.cjs" save .
       - uses: peter-evans/create-pull-request@v7
         with:
           branch: codegraph-seed-refresh
-          add-paths: .codegraph-seed/
+          add-paths: ${{ env.SERVICE_DIR }}/.codegraph-seed/
           commit-message: Refresh code graph seed
           title: Refresh code graph seed
           body: Weekly refresh of the committed CodeGraph index snapshot (.codegraph-seed/).

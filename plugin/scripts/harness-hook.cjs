@@ -35,11 +35,11 @@ const HOOK_OWNED = new Set(['state.json', 'approval.json', '.usage.json']);
 // Output redirection, checked after fd duplication (2>&1) and null-device targets are removed:
 // any other ">" except an arrow ("->", "=>") writes a file, with or without an fd number or "&".
 const REDIRECT = /(^|[^-=<>])>/;
-const WRITEISH = /(?<![-\w.])(tee\b|sed\s+(-[a-z]*i|--in-place)|perl\s+-[a-z]*i|(mv|cp|rm|rmdir|truncate|touch|dd|install|ln|unzip|tar\s+-?x\w*)\s)|\b(Set-Content|Add-Content|Out-File|New-Item|Remove-Item|Move-Item|Copy-Item|Rename-Item|Clear-Content)\b|\s-delete\b|\b(write|append|copy)File(Sync)?\b|\b(unlink|rename|rmSync|rmdirSync|truncate)(Sync)?\(|\.write(_text|_bytes|lines)?\(|\bos\.(remove|unlink|rename|replace|rmdir|removedirs)\(|\bshutil\.\w+\(|\.(unlink|rename|touch|rmdir)\(|open\([^)]*['"][wax+]/i;
+const WRITEISH = /(?<![-\w.])(tee\b|sed\s+(-[a-z]*i|--in-place)|perl\s+-[a-z]*i|(mv|cp|rm|rmdir|truncate|touch|dd|install|ln|unzip|tar\s+-?x\w*)\s)|\b(Set-Content|Add-Content|Out-File|New-Item|Remove-Item|Move-Item|Copy-Item|Rename-Item|Clear-Content)\b|\s-delete\b|(?<![-\w.])--(write|fix)(?![\w-])|\bspotless(Apply|:apply)\b|\b(black|isort|rustfmt)\s|\bcargo\s+fmt\b|\bdotnet\s+format\b|\b(gofmt|goimports|clang-format)\b[^|;&]*\s-[wi]\b|\b(write|append|copy)(Text)?File(Sync)?\b|\b(unlink|rename|rmSync|rmdirSync|truncate)(Sync)?\(|\.write(_text|_bytes|lines)?\(|\bos\.(remove|unlink|rename|replace|rmdir|removedirs)\(|\bshutil\.\w+\(|\.(unlink|rename|touch|rmdir)\(|open\([^)]*['"][wax+]/i;
 const CMD_KEYS = ['command', 'cmd', 'code', 'script', 'commands'];
 // Commands whose quoted text is code, not shell words: keep the quotes when testing them.
 const INTERPRETER = /\b(sh|bash|zsh|dash|fish|cmd|node|deno|bun|python[\d.]*|perl|ruby|php|pwsh|powershell|eval|awk|gawk)\b/i;
-const GIT_TREE_CHANGE = /\bgit\s+(apply|am|cherry-pick|merge|rebase|reset\s+--hard|restore|checkout\s+(--|\S+\s+--)|stash\s+(pop|apply)|pull|clean)\b/i;
+const GIT_TREE_CHANGE = /\bgit\s+(apply|am|cherry-pick|merge|rebase|reset\s+--hard|restore|checkout\s+(--|\S+\s+--)|stash\s+(pop|apply)|pull|clean)(?![\w-])/i;
 
 // ---------- small utilities ----------
 
@@ -228,6 +228,7 @@ function rel(root, p) {
     try { s = decodeURIComponent(s); } catch { /* keep as is */ }
     if (/^\/[A-Za-z]:[\\/]/.test(s)) s = s.slice(1); // file:///C:/...
   }
+  s = s.replace(/^(\\\\|\/\/)\?[\\/](?=[A-Za-z]:)/, ''); // \\?\C:\... extended-length form
   const abs = path.isAbsolute(s) ? s : path.join(root, s);
   let out = path.relative(root, abs);
   if (out.startsWith('..') || path.isAbsolute(out)) {
@@ -293,7 +294,18 @@ function commandText(input) {
     else if (isPlainObject(v)) for (const k of CMD_KEYS) if (k in v) pick(v[k], depth + 1);
   };
   for (const k of CMD_KEYS) if (k in input) pick(input[k], 0);
+  // create_and_run_task: { task: { type, command, args } }
+  if (isPlainObject(input.task) && typeof input.task.command === 'string') {
+    out.push([input.task.command, ...(Array.isArray(input.task.args) ? input.task.args.map(String) : [])].join(' '));
+  }
   return out.length ? out.join('\n') : JSON.stringify(input);
+}
+
+// A VS Code task or notebook cell whose command the hook cannot see (run_task names a task
+// from tasks.json; run_notebook_cell runs a cell's code).
+function opaqueRun(tool, input) {
+  if (!/(^|_)(run_?task|run_?notebook_?cell)$/i.test(tool)) return false;
+  return !(isPlainObject(input) && isPlainObject(input.task) && typeof input.task.command === 'string');
 }
 
 function escapeRe(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
@@ -335,8 +347,12 @@ function namesOwnedFile(cfg, text, scope) {
 }
 
 // The person's OK for a file-writing command outside implement, unless it only touches run files.
-function terminalAsk(cfg, scope, input) {
+function terminalAsk(cfg, scope, input, tool) {
   if (!(PRE_IMPLEMENT.has(scope) || scope === 'verify')) return null;
+  if (opaqueRun(String(tool || ''), input)) {
+    return `"${tool}" runs a VS Code task or notebook code the hook cannot inspect, and the ${scope} stage does not change code. `
+      + 'Allow it only if it does not modify source files.';
+  }
   const text = commandText(input);
   const treeChange = GIT_TREE_CHANGE.test(text);
   if (!treeChange && !writesFiles(input)) return null;
@@ -482,6 +498,19 @@ function findChangedApproval(cfg, run) {
       const file = path.join(run.dir, name);
       if (!fs.existsSync(file) || sha256(file) !== hash) return { stage, name };
     }
+  }
+  return null;
+}
+
+// The approved artifact a workspace path points at, if any: { stage, name }.
+function approvedArtifact(cfg, run, p) {
+  const prefix = key(`${cfg.runs.dir}/${run.id}/`);
+  const pk = key(p);
+  if (!pk.startsWith(prefix)) return null;
+  const name = pk.slice(prefix.length);
+  for (const stage of cfg.stages) {
+    const files = (run.state.approvals[stage] || {}).files || {};
+    if (Object.keys(files).some((n) => key(n) === name)) return { stage, name: Object.keys(files).find((n) => key(n) === name) };
   }
   return null;
 }
@@ -745,7 +774,7 @@ function approve(cfg, run, stage, root, skip) {
     const reviewed = markReviewed(cfg, run);
     run.state.approvals.tasks = (run.state.approvals.tasks || 0) + 1;
     resetUsage(run, 'implement-task');
-    return `Task review ${run.state.approvals.tasks} recorded${reviewed.length ? ` (${reviewed.join(', ')})` : ''}. Continue with the next task.`;
+    return { note: `Task review ${run.state.approvals.tasks} recorded${reviewed.length ? ` (${reviewed.join(', ')})` : ''}. Continue with the next task.` };
   }
   const idx = cfg.stages.indexOf(stage);
   if (idx < 0) blockPrompt(`Unknown stage "${stage}". Stages are: ${cfg.stages.join(', ')}.`);
@@ -767,6 +796,12 @@ function approve(cfg, run, stage, root, skip) {
     const impact = path.join(run.dir, 'impact.json');
     if (fs.existsSync(impact)) files['impact.json'] = sha256(impact);
   }
+  // An old Approve button pressed again must not reset later stages (and the task history).
+  const prev = run.state.approvals[stage];
+  const at = run.state.stage === 'done' ? cfg.stages.length : cfg.stages.indexOf(run.state.stage);
+  if (prev && prev.files && at > idx && sameFiles(prev.files, files)) {
+    return { note: `${stage} is already approved and unchanged; nothing changed. Active stage is ${run.state.stage}.`, again: true };
+  }
   if (stage === 'implement') { approveTasksCheck(cfg, run); markReviewed(cfg, run); }
   const by = approverName(root);
   const cc = crossCheckRecord(cfg, run, stage, files, skip, by);
@@ -787,7 +822,13 @@ function approve(cfg, run, stage, root, skip) {
     resetUsage(run, next);
     for (const sub of SUBSCOPES[next] || []) resetUsage(run, sub);
   }
-  return `Approved ${stage} by ${by}; artifact hashes recorded.${describeCheck(stage, cc)} Active stage is now ${next}.`;
+  return { note: `Approved ${stage} by ${by}; artifact hashes recorded.${describeCheck(stage, cc)} Active stage is now ${next}.` };
+}
+
+function sameFiles(a, b) {
+  const ka = Object.keys(a).sort();
+  const kb = Object.keys(b).sort();
+  return ka.length === kb.length && ka.every((k, i) => k === kb[i] && a[k] === b[k]);
 }
 
 function revise(cfg, run, stage) {
@@ -883,8 +924,9 @@ function onPrompt(cfg, root, scope, event) {
         run.state.session_tiers[scope] = { tier: cmd.tier, session: event.session_id || null, at: new Date().toISOString() };
         notes.push(`This ${scope} session now runs on the ${cmd.tier} tier${modelOf(cfg, cmd.tier)}. Task Runners up to ${cmd.tier} can run.`);
       } else if (cmd.action === 'approve') {
-        notes.push(approve(cfg, run, cmd.stage, root, cmd.skip));
-        if (cmd.stage === 'verify' && codegraph.shouldRefresh(root, cfg.code_index)) saveReason = `pr ${run.id}`;
+        const result = approve(cfg, run, cmd.stage, root, cmd.skip);
+        notes.push(result.note);
+        if (cmd.stage === 'verify' && !result.again && codegraph.shouldRefresh(root, cfg.code_index)) saveReason = `pr ${run.id}`;
       } else if (cmd.action === 'revise') notes.push(revise(cfg, run, cmd.stage));
       else if (cmd.action === 'stop') {
         // Stop pauses the run this chat works on, which may not be the active one.
@@ -921,11 +963,16 @@ function audit(cfg, root, scope, event) {
   } catch { /* ignore */ }
 }
 
-function toolKinds(cfg, tool) {
+function toolKinds(cfg, tool, input) {
   const re = (s, d) => { try { return new RegExp(s || d, 'i'); } catch { return new RegExp(d, 'i'); } };
   const looksMcp = /^mcp_/i.test(tool) || (/^[\w.-]+\/[\w.-]+$/.test(tool) && !/^(edit|read|search|execute|agent|web|vscode|todo)\//i.test(tool));
-  const isEdit = !looksMcp && re(cfg.hooks.edit_tools, '(edit|create|write|replace|insert|patch|delete|rename|move)').test(tool);
-  const isTerminal = (!looksMcp && re(cfg.hooks.terminal_tools, '(terminal|runInTerminal|run_in_terminal|execute|command|task)').test(tool))
+  // Tasks and notebook cells run code like a terminal does (create_and_run_task, run_task, run_notebook_cell).
+  const isTask = !looksMcp && /(^|_)(run_?task|run_?notebook_?cell)$/i.test(tool);
+  const editName = re(cfg.hooks.edit_tools, '(edit|create|write|replace|insert|patch|delete|rename|move)').test(tool);
+  // An MCP tool counts as an edit when its name says so and it names a file (a filesystem
+  // server's write_file); a Jira "addOrEditJiraIssueComment" names none.
+  const isEdit = !isTask && editName && (!looksMcp || (input != null && collectPaths(input, process.cwd()).length > 0));
+  const isTerminal = isTask || (!looksMcp && re(cfg.hooks.terminal_tools, '(terminal|runInTerminal|run_in_terminal|execute|command)').test(tool))
     || (looksMcp && /(execute|exec|shell|bash|run_?command|batch_execute)/i.test(tool));
   const isSubagent = re(cfg.hooks.subagent_tools, '(subagent|runSubagent)').test(tool);
   return { looksMcp, isEdit, isTerminal, isSubagent };
@@ -965,7 +1012,7 @@ function onPreTool(cfg, root, scope, event) {
 function preTool(cfg, root, scope, event) {
   const tool = String(event.tool_name || '');
   const input = event.tool_input || {};
-  const { isEdit, isTerminal, isSubagent } = toolKinds(cfg, tool);
+  const { isEdit, isTerminal, isSubagent } = toolKinds(cfg, tool, input);
   const run = loadRun(root, cfg);
   const runId = run.status === 'ok' ? run.id : null;
   const runRel = runId ? `${cfg.runs.dir}/${runId}/` : `${cfg.runs.dir}/`;
@@ -999,7 +1046,7 @@ function preTool(cfg, root, scope, event) {
     }
     if (isTerminal && IMPLEMENT.has(scope)) return decide('deny', 'There is no usable active run, so the plan is not approved.');
     if (isTerminal) {
-      const ask = terminalAsk(cfg, scope, input);
+      const ask = terminalAsk(cfg, scope, input, tool);
       if (ask) return decide('ask', ask);
     }
     return;
@@ -1047,6 +1094,11 @@ function preTool(cfg, root, scope, event) {
         continue;
       }
       if (why) return decide('deny', why);
+      const approved = approvedArtifact(cfg, run, p);
+      if (approved) {
+        return decide('deny', `${approved.name} was approved at the ${approved.stage} stage, and changing it now would void that `
+          + `approval. To change it, the person types "back to ${approved.stage}" and approves it again.`);
+      }
       const inRuns = key(p).startsWith(key(cfg.runs.dir) + '/');
       if (scope === 'cross-check' && !(key(p).startsWith(key(runRel)) && /-check\.md$/i.test(p))) {
         return decide('deny', `A Checker only writes its <stage>-check.md in ${runRel}; the stage agent applies the findings.`);
@@ -1078,7 +1130,7 @@ function preTool(cfg, root, scope, event) {
       const pa = planApproval(cfg, run);
       if (!pa.ok) return decide('deny', pa.reason);
     } else {
-      const ask = terminalAsk(cfg, scope, input);
+      const ask = terminalAsk(cfg, scope, input, tool);
       if (ask) return decide('ask', ask);
     }
   }
@@ -1136,7 +1188,7 @@ function onPostTool(cfg, root, scope, event) {
     const run = loadRun(root, cfg);
     if (run.status !== 'ok') return;
     const tool = String(event.tool_name || '');
-    const { isEdit, isTerminal } = toolKinds(cfg, tool);
+    const { isEdit, isTerminal } = toolKinds(cfg, tool, event.tool_input);
     if (IMPLEMENT.has(scope) && (isEdit || isTerminal)) syncNeeded = true;
     // The orchestrator may have switched the active run for this chat.
     if (scope === 'orchestrator' && isEdit) bindSession(root, cfg, event.session_id, run.id);
@@ -1179,6 +1231,10 @@ function main() {
     if (raw.trim()) event = JSON.parse(raw);
   } catch { /* no stdin */ }
   if (!isPlainObject(event)) event = {};
+  // Some clients send tool_input as a JSON string.
+  if (typeof event.tool_input === 'string' && /^\s*[{[]/.test(event.tool_input)) {
+    try { event.tool_input = JSON.parse(event.tool_input); } catch { /* keep the string */ }
+  }
   // The opened folder is the root: agents write run files relative to it, also when it is a
   // subfolder of a monorepo or reached through a symlink. Without a cwd, use the repo top.
   const root = event.cwd && fs.existsSync(String(event.cwd))
