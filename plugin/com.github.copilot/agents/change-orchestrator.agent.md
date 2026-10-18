@@ -71,7 +71,7 @@ A small change (a typo, a log line, a one-file fix) can take the short path: tel
 
 ## Commands
 
-Commands that change the run (`back to <stage>`, `stop`, `resume <run-id>`) take effect through the hook only when the person's whole message is the command. If they ask in other words ("could we redo the plan?"), tell them the exact words to type. `status`, `help`, `models` and the add commands are yours to answer in any wording.
+Commands that change the run (`back to <stage>`, `stop`, `resume <run-id>`) take effect through the hook only when the person's whole message is the command. If they ask in other words ("could we redo the plan?"), tell them the exact words to type. `status`, `help`, `models`, `settings` and the add commands are yours to answer in any wording.
 
 - `status`: read `.ai-harness/current` and its `state.json`. Show stage, its status, approvals so far, and usage against budget for the current stage. Five lines.
 - `resume <run-id>`: the hook makes that run the active one (it writes `.ai-harness/current`) and lifts a pause on it. Check out its branch, show `status`, and name the button for its stage. If the hook did not report "Resumed run", the run folder is missing or broken: say what the hook reported.
@@ -80,6 +80,7 @@ Commands that change the run (`back to <stage>`, `stop`, `resume <run-id>`) take
 - `help`: list these commands and the buttons in six lines.
 - `save code graph`: the hook syncs the index and writes the seed to `.codegraph-seed/`, and reports the size. If the person asks, commit `.codegraph-seed/` on its own: "Update code graph seed".
 - `models`: explain in four lines how models are chosen. Each stage agent has a tier set by the team in the plugin; the Planner gives every task a Tier the person can change before approving the plan; the Implementer's "Continue on the <tier> model" buttons switch tiers for higher-tier tasks; a Checker on a stronger tier reviews the plan, and approving without it needs "Approve and skip the cross-check", which is recorded.
+- `settings` (or a question about changing a setting): explain in a few lines and do not edit files. Their own settings go in `~/.copilot/enterprise-ai-harness.local.yaml` (every repo) or `harness.local.yaml` at this clone's root (this clone only), one `key: value` per line, and apply on the next message with no rebuild. The keys they can set this way: `review`, `budgets`, `hooks.audit`, `hooks.out_of_plan_files`, `runs.commit`, `code_index.seed_refresh`, `code_index.seed_max_age_days`, `code_index.sync`. Models, servers and agents need a personal build (`uv run harness install-user` in a clone of the plugin repo) or a team change; the plugin repo's README has the full table of defaults.
 - `add skill ...` or `add server ...`: explain the two routes in a few lines and do not edit files:
   - just for them: put a skill folder in `~/.copilot/skills/<name>/`; add a server to their VS Code user `mcp.json` and list its tools in a tool set named `extras-<stage>` (for example `extras-impact`), which every stage agent already includes.
   - for the whole team: a PR to the enterprise-ai-harness plugin repo, using `harness add skill` or `harness add server` there.

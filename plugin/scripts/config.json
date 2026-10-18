@@ -1,6 +1,6 @@
 {
   "plugin": "enterprise-ai-harness",
-  "version": "0.4.2",
+  "version": "0.5.0",
   "stages": [
     "intake",
     "grill",
@@ -83,6 +83,16 @@
     "subagent_tools": "(subagent|runSubagent)",
     "out_of_plan_files": "ask"
   },
+  "personal_overrides": [
+    "review",
+    "budgets",
+    "hooks.audit",
+    "hooks.out_of_plan_files",
+    "runs.commit",
+    "code_index.seed_refresh",
+    "code_index.seed_max_age_days",
+    "code_index.sync"
+  ],
   "runs": {
     "dir": ".ai-harness",
     "commit": false

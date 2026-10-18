@@ -23,6 +23,7 @@ def harness(tmp_path: Path) -> Path:
     root.mkdir()
     shutil.copytree(REPO / "sources", root / "sources")
     text = (REPO / "harness.yaml").read_text().replace("url: <kb-mcp-url>", "url: https://kb.example.internal/mcp")
+    text = text.replace("    enabled: false             # kb: remove once url is set\n", "")  # what a team does
     (root / "harness.yaml").write_text(text)
     build(load(root))
     return root
@@ -45,8 +46,12 @@ def run_hook(harness: Path, repo: Path, mode: str, scope: str, event: dict | Non
     script = harness / "plugin/scripts/harness-hook.cjs"
     payload = {"cwd": str(repo), "timestamp": "2026-10-02T00:00:00Z", **(event or {})}
     import os
+    # A home folder of the test's own, so a developer's real personal settings never leak in.
+    home = repo.parent / "home"
+    home.mkdir(exist_ok=True)
+    base = {**os.environ, "HOME": str(home), "USERPROFILE": str(home)}
     proc = subprocess.run(["node", str(script), mode, scope], input=json.dumps(payload), capture_output=True,
-                          text=True, cwd=repo, timeout=60, env={**os.environ, **(env or {})})
+                          text=True, cwd=repo, timeout=60, env={**base, **(env or {})})
     out = json.loads(proc.stdout) if proc.stdout.strip() else None
     return proc.returncode, out, proc.stderr
 

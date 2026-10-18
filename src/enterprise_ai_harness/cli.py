@@ -1,7 +1,9 @@
-"""Command line for the harness maintainer, run inside the harness repo.
+"""Command line for the harness, run inside a clone of the harness repo.
 
-Developers do not need it: they install the plugin in VS Code. `install-user`
-is the fallback for machines where agent plugins are not allowed.
+Most developers do not need it: they install the plugin in VS Code. A developer uses
+`config` to see or start their personal settings, and `install-user` for a personal
+build (settings the marketplace plugin cannot take at run time) or on machines where
+agent plugins are not allowed. Maintainers use `build`, `doctor` and `add`.
 """
 
 from __future__ import annotations
@@ -9,14 +11,18 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import tempfile
 from pathlib import Path
+
+import yaml
 
 from enterprise_ai_harness import __version__
 from enterprise_ai_harness.build import BuildReport, build
 from enterprise_ai_harness.config import ConfigError, load
 from enterprise_ai_harness.doctor import check, summarize
 from enterprise_ai_harness.extend import ExtendError, add_server, add_skill
-from enterprise_ai_harness.install import install_user
+from enterprise_ai_harness.install import install_user, personal_settings_file
+from enterprise_ai_harness.personal import describe, read as read_personal, template
 
 
 def _csv(value: str | None) -> list[str] | None:
@@ -62,11 +68,60 @@ def cmd_add(args) -> int:
     return 0
 
 
+def _personal_file(args, cfg) -> Path | None:
+    if getattr(args, "team_only", False):
+        return None
+    path = Path(args.personal).expanduser() if getattr(args, "personal", None) else personal_settings_file(cfg, args.copilot_dir)
+    if getattr(args, "personal", None) and not path.exists():
+        raise FileNotFoundError(f"{path} does not exist")
+    return path if path.exists() else None
+
+
 def cmd_install_user(args) -> int:
-    cfg = load(args.root)
-    for m in install_user(cfg, copilot_dir=args.copilot_dir, vscode_user_dir=args.vscode_user_dir,
-                          uninstall=args.uninstall):
-        print(f"  {m}")
+    team = load(args.root)
+    if args.uninstall:
+        for m in install_user(team, copilot_dir=args.copilot_dir, vscode_user_dir=args.vscode_user_dir, uninstall=True):
+            print(f"  {m}")
+        return 0
+    personal = _personal_file(args, team)
+    cfg = load(team.root, overlay=personal) if personal else team
+    if personal:
+        print(f"  applied your settings from {personal}")
+    with tempfile.TemporaryDirectory(prefix="harness-build-") as out:
+        build(cfg, out=Path(out))
+        for m in install_user(cfg, copilot_dir=args.copilot_dir, vscode_user_dir=args.vscode_user_dir, source=Path(out)):
+            print(f"  {m}")
+    print("  If the plugin from the marketplace is also installed, disable it so each agent appears once.")
+    return 0
+
+
+def cmd_config(args) -> int:
+    team = load(args.root)
+    if args.template:
+        print(template(team), end="")
+        return 0
+    if args.init:
+        dest = personal_settings_file(team, args.copilot_dir)
+        if dest.exists():
+            print(f"  {dest} already exists; not overwritten")
+            return 1
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(template(team), encoding="utf-8")
+        print(f"  wrote {dest}; uncomment the lines you want to change")
+        return 0
+    personal = _personal_file(args, team)
+    cfg = load(team.root, overlay=personal) if personal else team
+    if personal:
+        sorted_keys = describe(team, read_personal(personal), repo_level=args.repo_level)
+        print(f"# Your settings: {personal}")
+        print(f"#   apply now (the hook reads them):   {', '.join(sorted_keys['now']) or 'none'}")
+        print(f"#   need `harness install-user`:       {', '.join(sorted_keys['build']) or 'none'}")
+        print(f"#   ignored (kept the same by the team): {', '.join(sorted_keys['ignored']) or 'none'}")
+        print("# Effective configuration (harness.yaml with your settings on top):")
+    else:
+        print("# Effective configuration (harness.yaml; no personal settings file found):")
+    data = cfg.raw if not args.section else {args.section: cfg.raw.get(args.section)}
+    print(yaml.safe_dump(data, sort_keys=False, allow_unicode=True), end="")
     return 0
 
 
@@ -119,11 +174,24 @@ def build_parser() -> argparse.ArgumentParser:
     sv.add_argument("--capability", help="point an existing capability at this server")
     sp.set_defaults(func=cmd_add)
 
-    sp = sub.add_parser("install-user", help="fallback: install into ~/.copilot and the VS Code user mcp.json")
+    sp = sub.add_parser("install-user", help="build and install for you only: ~/.copilot and the VS Code user mcp.json, "
+                                             "with your personal settings file applied")
     sp.add_argument("--copilot-dir", type=Path)
     sp.add_argument("--vscode-user-dir", type=Path)
+    sp.add_argument("--personal", help="personal settings file (default: ~/.copilot/<plugin>.local.yaml if it exists)")
+    sp.add_argument("--team-only", action="store_true", help="ignore your personal settings file")
     sp.add_argument("--uninstall", action="store_true")
     sp.set_defaults(func=cmd_install_user)
+
+    sp = sub.add_parser("config", help="show the effective configuration, or write your personal settings file")
+    sp.add_argument("section", nargs="?", help="only this top-level section, e.g. models or servers")
+    sp.add_argument("--personal", help="personal settings file (default: ~/.copilot/<plugin>.local.yaml if it exists)")
+    sp.add_argument("--team-only", action="store_true", help="show the team configuration only")
+    sp.add_argument("--repo-level", action="store_true", help="treat the file as a repo's harness.local.yaml")
+    sp.add_argument("--template", action="store_true", help="print the personal settings template")
+    sp.add_argument("--init", action="store_true", help="write the template to ~/.copilot/<plugin>.local.yaml")
+    sp.add_argument("--copilot-dir", type=Path, help=argparse.SUPPRESS)
+    sp.set_defaults(func=cmd_config)
 
     sp = sub.add_parser("status", help="list change runs in a service repo clone")
     sp.add_argument("--repo", default=".")

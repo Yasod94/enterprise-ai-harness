@@ -115,24 +115,55 @@ function parseSimpleYaml(text) {
 
 // Personal settings may change review modes, budgets and audit logging only. Edit-tool
 // patterns and the out-of-plan rule stay with the team configuration.
-function personalOverrides(local) {
+// The settings a developer may change for themselves without a rebuild: the team's
+// personal_overrides list, each value checked so a typo cannot loosen a guard by accident.
+const PERSONAL_DEFAULT = ['review', 'budgets', 'hooks.audit', 'hooks.out_of_plan_files', 'runs.commit',
+  'code_index.seed_refresh', 'code_index.seed_max_age_days', 'code_index.sync'];
+
+function personalOverrides(local, allowedList) {
+  const allowed = new Set(Array.isArray(allowedList) ? allowedList : PERSONAL_DEFAULT);
   const out = {};
-  if (isPlainObject(local.review)) {
-    out.review = {};
-    for (const [k, v] of Object.entries(local.review)) if (typeof v === 'string') out.review[k] = v;
+  const put = (dotted, value) => {
+    const [a, b] = dotted.split('.');
+    out[a] = out[a] || {};
+    out[a][b] = value;
+  };
+  if (allowed.has('review') && isPlainObject(local.review)) {
+    for (const [k, v] of Object.entries(local.review)) {
+      if (typeof v === 'string' && /^(required|per-task|per-batch-\d+|none)$/.test(v)) put(`review.${k}`, v);
+    }
   }
-  if (isPlainObject(local.budgets)) {
-    out.budgets = {};
+  if (allowed.has('budgets') && isPlainObject(local.budgets)) {
     for (const [k, v] of Object.entries(local.budgets)) {
       if (!isPlainObject(v)) continue;
       const b = {};
-      if (Number(v.tool_calls) > 0) b.tool_calls = Number(v.tool_calls);
-      if (Number(v.output_kb) > 0) b.output_kb = Number(v.output_kb);
-      if (Object.keys(b).length) out.budgets[k] = b;
+      if (Number(v.tool_calls) > 0) b.tool_calls = Math.floor(Number(v.tool_calls));
+      if (Number(v.output_kb) > 0) b.output_kb = Math.floor(Number(v.output_kb));
+      if (Object.keys(b).length) put(`budgets.${k}`, b);
     }
   }
-  if (isPlainObject(local.hooks) && typeof local.hooks.audit === 'boolean') out.hooks = { audit: local.hooks.audit };
+  const hooks = isPlainObject(local.hooks) ? local.hooks : {};
+  if (allowed.has('hooks.audit') && typeof hooks.audit === 'boolean') put('hooks.audit', hooks.audit);
+  if (allowed.has('hooks.out_of_plan_files') && ['ask', 'allow', 'deny'].includes(hooks.out_of_plan_files)) {
+    put('hooks.out_of_plan_files', hooks.out_of_plan_files);
+  }
+  const runs = isPlainObject(local.runs) ? local.runs : {};
+  if (allowed.has('runs.commit') && typeof runs.commit === 'boolean') put('runs.commit', runs.commit);
+  const idx = isPlainObject(local.code_index) ? local.code_index : {};
+  if (allowed.has('code_index.seed_refresh') && ['stale', 'every-pr', 'manual'].includes(idx.seed_refresh)) {
+    put('code_index.seed_refresh', idx.seed_refresh);
+  }
+  if (allowed.has('code_index.seed_max_age_days') && Number(idx.seed_max_age_days) > 0) {
+    put('code_index.seed_max_age_days', Number(idx.seed_max_age_days));
+  }
+  if (allowed.has('code_index.sync') && typeof idx.sync === 'string' && idx.sync.trim()) put('code_index.sync', idx.sync.trim());
   return out;
+}
+
+// Where personal settings come from, lowest first; later files win.
+function personalFiles(cfg, root) {
+  return [path.join(os.homedir(), '.copilot', `${cfg.plugin || 'enterprise-ai-harness'}.local.yaml`),
+    path.join(root, 'harness.local.yaml')];
 }
 
 function gitTop(cwd) {
@@ -145,11 +176,11 @@ function gitTop(cwd) {
 
 function loadConfig(root) {
   let cfg = readJson(path.join(HOOK_DIR, 'config.json'), {});
-  const personal = [path.join(os.homedir(), '.copilot', `${cfg.plugin || 'enterprise-ai-harness'}.local.yaml`),
-    path.join(root, 'harness.local.yaml')];
-  for (const localFile of personal) {
+  for (const localFile of personalFiles(cfg, root)) {
     try {
-      if (fs.existsSync(localFile)) cfg = deepMerge(cfg, personalOverrides(parseSimpleYaml(fs.readFileSync(localFile, 'utf8'))));
+      if (fs.existsSync(localFile)) {
+        cfg = deepMerge(cfg, personalOverrides(parseSimpleYaml(fs.readFileSync(localFile, 'utf8')), cfg.personal_overrides));
+      }
     } catch { /* a broken personal file must never block work */ }
   }
   cfg.stages = cfg.stages || USER_STAGES;
@@ -185,20 +216,26 @@ function ensureLocalExcludes(root, cfg) {
   // In a monorepo opened at a subfolder, exclude patterns are anchored at that subfolder.
   const at = (p) => (prefix ? `/${prefix.replace(/\/?$/, '/')}${p}` : p);
   const r = cfg.runs.dir;
-  const wanted = (cfg.runs.commit
-    ? [`${r}/current`, `${r}/.hooks-ok`, `${r}/.sessions.json`, `${r}/.lock`, `${r}/.audit.log`, `${r}/*/.usage.json`, `${r}/*/*.tmp`]
-    : [`${r}/`]).map(at);
+  const runtimeOnly = [`${r}/current`, `${r}/.hooks-ok`, `${r}/.sessions.json`, `${r}/.lock`, `${r}/.audit.log`,
+    `${r}/*/.usage.json`, `${r}/*/*.tmp`].map(at);
+  const whole = at(`${r}/`);
+  const runLines = cfg.runs.commit ? runtimeOnly : [whole];
   // CodeGraph's own .codegraph/.gitignore re-includes itself; excluding the
   // directory keeps the working index entirely out of git status.
-  wanted.push(at(`${(cfg.code_index.dir || '.codegraph').replace(/\/+$/, '')}/`), at('harness.local.yaml'));
+  const wanted = [...runLines, at(`${(cfg.code_index.dir || '.codegraph').replace(/\/+$/, '')}/`), at('harness.local.yaml')];
+  // Lines this hook wrote for the other runs.commit setting are dropped, so switching
+  // the setting (for the team or for one developer) takes effect.
+  const stale = new Set([whole, ...runtimeOnly].filter((l) => !wanted.includes(l)));
   let text = '';
   try { text = fs.readFileSync(file, 'utf8'); } catch { /* new file */ }
-  const lines = text.split(/\r?\n/);
-  const missing = wanted.filter((w) => !lines.includes(w));
-  if (!missing.length) return true;
+  const lines = text ? text.split(/\r?\n/) : [];
+  if (lines.length && lines[lines.length - 1] === '') lines.pop();
+  const kept = lines.filter((l) => !stale.has(l));
+  const missing = wanted.filter((w) => !kept.includes(w));
+  if (!missing.length && kept.length === lines.length) return true;
+  if (missing.length && !kept.includes('# enterprise-ai-harness')) kept.push('# enterprise-ai-harness');
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  const header = lines.includes('# enterprise-ai-harness') ? [] : ['# enterprise-ai-harness'];
-  fs.appendFileSync(file, (text && !text.endsWith('\n') ? '\n' : '') + [...header, ...missing].join('\n') + '\n');
+  fs.writeFileSync(file, [...kept, ...missing].join('\n') + '\n');
   return true;
 }
 

@@ -2,7 +2,7 @@
   "name": "enterprise-ai-harness",
   "metadata": {
     "description": "Copilot change workflow with a review after every stage, approval-gated code edits and swappable MCP tools.",
-    "version": "0.4.2"
+    "version": "0.5.0"
   },
   "owner": {
     "name": "Yasod94"
@@ -12,7 +12,7 @@
       "name": "enterprise-ai-harness",
       "source": "./plugin",
       "description": "Copilot change workflow with a review after every stage, approval-gated code edits and swappable MCP tools.",
-      "version": "0.4.2"
+      "version": "0.5.0"
     }
   ]
 }

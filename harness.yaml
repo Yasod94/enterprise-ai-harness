@@ -10,7 +10,7 @@ version: 1
 
 plugin:
   name: enterprise-ai-harness
-  version: 0.4.2
+  version: 0.5.0
   description: Copilot change workflow with a review after every stage, approval-gated code edits and swappable MCP tools.
   repository: https://github.com/Yasod94/enterprise-ai-harness
   owner: Yasod94
@@ -55,9 +55,12 @@ servers:
     tools: [getAccessibleAtlassianResources, getJiraIssue, searchJiraIssuesUsingJql, discover, executeRead]
     est_tools: 25
   kb:
-    # Your KB MCP: architecture graph plus Confluence content. Fill in before rollout.
+    # Your KB MCP: architecture graph plus Confluence content. Off by default: set
+    # the URL, delete the enabled line and rebuild. While it is off, docs.search
+    # uses Atlassian and arch.graph uses its fallback.
     type: http
-    url: <kb-mcp-url>
+    url: <kb-mcp-url>          # for example https://kb.example.internal/mcp
+    enabled: false             # kb: remove once url is set
     est_tools: 8
   codegraph:
     type: stdio
@@ -256,8 +259,7 @@ review:
 
 # Budgets per agent scope, counted by the hook. At the limit, further tool calls are
 # denied and the agent shows its review card. Type "extend" to add 50%.
-# Developers can override review modes and budgets for themselves in
-# ~/.copilot/enterprise-ai-harness.local.yaml.
+# Developers can override these for themselves (see personal_overrides).
 budgets:
   orchestrator: { tool_calls: 30 }
   check: { tool_calls: 20 }
@@ -322,6 +324,22 @@ hooks:
   terminal_tools: "(terminal|runInTerminal|run_in_terminal|execute|command)"
   subagent_tools: "(subagent|runSubagent)"
   out_of_plan_files: ask       # edits to files not in impact.json: ask | allow | deny
+
+# Settings each developer may change for themselves, without a rebuild, in
+# ~/.copilot/enterprise-ai-harness.local.yaml (all repos) or harness.local.yaml at the
+# root of a service repo clone (that clone only; the hook keeps it out of git).
+# Remove an entry to keep that setting the same for everyone. Anything not listed
+# here can still be changed for one developer with a personal build
+# (`harness install-user`, see the README).
+personal_overrides:
+  - review                     # review mode per stage
+  - budgets                    # tool-call and output budgets per agent scope
+  - hooks.audit                # tool-call log in .ai-harness/.audit.log
+  - hooks.out_of_plan_files    # ask | allow | deny for edits outside impact.json
+  - runs.commit                # commit run files with the PR
+  - code_index.seed_refresh    # stale | every-pr | manual
+  - code_index.seed_max_age_days
+  - code_index.sync            # command the hook runs to update the code graph
 
 # Extra team skills: vendored under sources/skills/vendor/ by `harness add skill`.
 # `stages` makes those stage agents load the skill at start.

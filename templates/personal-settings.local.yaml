@@ -1,0 +1,69 @@
+# Personal settings for enterprise-ai-harness 0.5.0.
+# Save as ~/.copilot/enterprise-ai-harness.local.yaml (all your repos), or as harness.local.yaml
+# at the root of one service repo clone (that clone only; the hook keeps it out of git).
+# Uncomment a line to change it; a line left commented keeps the team value shown.
+# The hook reads this file on every call, so changes apply at once: no rebuild, no restart.
+# Write one `key: value` per line. [lists] and {maps} on one line are ignored here.
+
+review:
+#  implement: per-task            # per-task | per-batch-<n> | none; the other stages always end in a review
+
+budgets:                  # per agent scope; at the limit, type "extend" for 50% more
+#  orchestrator:
+#    tool_calls: 30
+#  check:
+#    tool_calls: 20
+#  intake:
+#    tool_calls: 20
+#  grill:
+#    tool_calls: 40
+#  impact:
+#    tool_calls: 80
+#    output_kb: 200
+#  scout:
+#    tool_calls: 25
+#  plan:
+#    tool_calls: 40
+#  implement:
+#    tool_calls: 300
+#    output_kb: 600
+#  implement-task:
+#    tool_calls: 30
+#    output_kb: 200
+#  verify:
+#    tool_calls: 40
+#  cross-check:
+#    tool_calls: 40
+
+hooks:
+#  audit: false                   # log tool names to .ai-harness/.audit.log
+#  out_of_plan_files: ask         # ask | allow | deny
+
+runs:
+#  commit: false                  # true: the Reviewer commits the run record with the PR
+
+code_index:
+#  seed_refresh: stale            # stale | every-pr | manual
+#  seed_max_age_days: 7           # with stale: refresh when older
+#  sync: npx -y @colbymchenry/codegraph@1.6.1 sync --quiet
+
+# ---- These need a personal build ----
+# Anything else from harness.yaml can go below: models, servers, capabilities, agents.
+# The plugin from the marketplace ignores these keys. To apply them, turn the
+# marketplace plugin off and, in a clone of the harness repo, run
+#   uv run harness install-user
+# which builds a copy with this file applied and installs it for you only.
+# `~` removes a setting; `enabled: false` turns a server off.
+#
+# models:
+#   agents:
+#     planner: deep                 # run the Planner on the deep tier
+#   tiers:
+#     deep:
+#       models: ["Claude Opus 5.5 (copilot)"]
+# servers:
+#   kb:
+#     url: https://kb.example.internal/mcp
+#     enabled: true
+#   ctx:
+#     enabled: false                # do without context-mode; its capability falls back

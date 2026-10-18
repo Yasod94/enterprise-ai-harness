@@ -18,7 +18,8 @@ import stat
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from enterprise_ai_harness.config import CHECKER_AGENT, Config
+from enterprise_ai_harness.config import CHECKER_AGENT, DEFAULT_RUNS_DIR, Config
+from enterprise_ai_harness.personal import TEMPLATE_FILE, template
 
 PLUGIN_DIR = "plugin"
 AGENTS_DIR = f"{PLUGIN_DIR}/com.github.copilot/agents"
@@ -289,6 +290,7 @@ def render_agent(cfg: Config, v: Variant) -> str:
     text = text.replace("{{skills}}", render_skill_refs(cfg, agent_id))
     text = text.replace("{{capabilities}}", render_capabilities(cfg, agent_id))
     text = text.replace("{{plugin}}", cfg.plugin_name)
+    text = text.replace("{{personal_overrides}}", ", ".join(f"`{k}`" for k in cfg.personal_overrides) or "none")
     head, sep, body = text.partition("\n---\n")
     if sep:  # drop blank lines that empty handoff placeholders leave in the frontmatter
         head = re.sub(r"\n[ \t]*(?=\n)", "", head)
@@ -325,8 +327,18 @@ def skill_files(cfg: Config) -> dict[str, dict[str, bytes]]:
             }
             if skill_dir.name in manual and "SKILL.md" in files:
                 files["SKILL.md"] = manual_only(files["SKILL.md"])
+            if group == "team":
+                files = {rel: with_runs_dir(cfg, data) if rel.endswith(".md") else data for rel, data in files.items()}
             skills[skill_dir.name] = files
     return skills
+
+
+def with_runs_dir(cfg: Config, data: bytes) -> bytes:
+    """Agent and team-skill text names the run folder as `.ai-harness`; follow runs.dir."""
+    if cfg.runs_dir == DEFAULT_RUNS_DIR:
+        return data
+    return data.decode("utf-8").replace(f"{DEFAULT_RUNS_DIR}/", f"{cfg.runs_dir}/").replace(
+        f"`{DEFAULT_RUNS_DIR}`", f"`{cfg.runs_dir}`").encode("utf-8")
 
 
 def hook_config(cfg: Config) -> dict:
@@ -338,6 +350,7 @@ def hook_config(cfg: Config) -> dict:
         "budgets": cfg.raw.get("budgets", {}),
         "review": cfg.raw.get("review", {}),
         "hooks": cfg.raw.get("hooks", {}),
+        "personal_overrides": cfg.personal_overrides,
         "runs": {"dir": cfg.runs_dir, "commit": bool((cfg.raw.get("runs") or {}).get("commit", False))},
         "code_index": cfg.code_index,
         "agent_scopes": {v.name: cfg.agents[v.agent_id]["scope"] for v in all_variants(cfg)},
@@ -415,7 +428,7 @@ def as_json(data: dict) -> bytes:
 def desired(cfg: Config) -> dict[str, bytes]:
     files: dict[str, bytes] = {}
     for v in all_variants(cfg):
-        files[f"{AGENTS_DIR}/{v.file_id}.agent.md"] = render_agent(cfg, v).encode()
+        files[f"{AGENTS_DIR}/{v.file_id}.agent.md"] = with_runs_dir(cfg, render_agent(cfg, v).encode())
     for name, sfiles in skill_files(cfg).items():
         for rel, data in sfiles.items():
             files[f"{SKILLS_DIR}/{name}/{rel}"] = data
@@ -425,6 +438,7 @@ def desired(cfg: Config) -> dict[str, bytes]:
     files[f"{PLUGIN_DIR}/mcp.json"] = as_json(mcp_config(cfg))
     files[f"{PLUGIN_DIR}/plugin.json"] = as_json(plugin_manifest(cfg))
     files[MARKETPLACE] = as_json(marketplace(cfg))
+    files[TEMPLATE_FILE] = template(cfg).encode()
     return files
 
 
@@ -439,10 +453,12 @@ class BuildReport:
         return bool(self.written or self.removed)
 
 
-def build(cfg: Config, check: bool = False) -> BuildReport:
+def build(cfg: Config, check: bool = False, out: Path | None = None) -> BuildReport:
+    """Write plugin/ and the marketplace manifest under the harness repo, or under `out`
+    for a personal build that must not touch the committed plugin/."""
     report = BuildReport()
     files = desired(cfg)
-    root = cfg.root
+    root = Path(out) if out is not None else cfg.root
     for rel, data in sorted(files.items()):
         path = root / rel
         if path.exists() and path.read_bytes() == data:

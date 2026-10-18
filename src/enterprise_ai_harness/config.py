@@ -11,11 +11,20 @@ from typing import Any
 import yaml
 
 CONFIG_FILE = "harness.yaml"
+DEFAULT_RUNS_DIR = ".ai-harness"
 PLACEHOLDER = re.compile(r"<[a-z0-9][a-z0-9 _.-]*>", re.IGNORECASE)
 
 BY_TASK = "by-task"
 CHECK_WHEN = ("below", "always", "offer", "never")
 CHECKER_AGENT = "cross-checker"
+
+# Settings the hook can take from a developer's own file at run time, without a
+# rebuild. The team's `personal_overrides` list picks which of these are allowed.
+PERSONAL_RUNTIME_KEYS = (
+    "review", "budgets", "hooks.audit", "hooks.out_of_plan_files", "runs.commit",
+    "code_index.seed_refresh", "code_index.seed_max_age_days", "code_index.sync",
+)
+DEFAULT_PERSONAL_OVERRIDES = list(PERSONAL_RUNTIME_KEYS)
 
 BUILTIN_TOOL_ESTIMATE = {
     "read": 3, "search": 4, "edit": 3, "execute": 3, "agent": 1, "todos": 1, "web": 1, "browser": 6,
@@ -40,6 +49,22 @@ def read_yaml(path: Path) -> dict:
     if not isinstance(data, dict):
         raise ConfigError(f"{path} must contain a YAML mapping")
     return data
+
+
+def merge(base: Any, overlay: Any) -> Any:
+    """Overlay on top of base: mappings merge key by key, anything else replaces, and a
+    null value removes the key (so a personal file can drop a server or a setting)."""
+    if not isinstance(base, dict) or not isinstance(overlay, dict):
+        return copy.deepcopy(overlay)
+    out = copy.deepcopy(base)
+    for k, v in overlay.items():
+        if v is None:
+            out.pop(k, None)
+        elif isinstance(v, dict) and isinstance(out.get(k), dict):
+            out[k] = merge(out[k], v)
+        else:
+            out[k] = copy.deepcopy(v)
+    return out
 
 
 def has_placeholder(value: Any) -> bool:
@@ -95,11 +120,16 @@ class Config:
 
     @property
     def runs_dir(self) -> str:
-        return str((self.raw.get("runs") or {}).get("dir") or ".ai-harness").rstrip("/")
+        return str((self.raw.get("runs") or {}).get("dir") or DEFAULT_RUNS_DIR).rstrip("/")
 
     @property
     def skills_manual_only(self) -> list[str]:
         return list(self.raw.get("skills_manual_only") or [])
+
+    @property
+    def personal_overrides(self) -> list[str]:
+        value = self.raw.get("personal_overrides", DEFAULT_PERSONAL_OVERRIDES)
+        return [str(k) for k in (value or [])]
 
     @property
     def code_index(self) -> dict:
@@ -273,9 +303,24 @@ class Config:
         return total
 
 
-def load(root: Path | None = None) -> Config:
+def personal_overlay(data: dict) -> dict:
+    """A developer's settings file as an overlay on harness.yaml. The hook's short form
+    `code_index:` maps to capabilities.code.graph.index."""
+    data = copy.deepcopy(data)
+    index = data.pop("code_index", None)
+    if isinstance(index, dict):
+        data = merge(data, {"capabilities": {"code.graph": {"index": index}}})
+    return data
+
+
+def load(root: Path | None = None, overlay: Path | dict | None = None) -> Config:
+    """Load harness.yaml; `overlay` (a developer's settings file, or a mapping) is merged on top."""
     root = find_root(root) if root is None or not (Path(root) / CONFIG_FILE).exists() else Path(root).resolve()
-    cfg = Config(raw=read_yaml(root / CONFIG_FILE), root=root)
+    raw = read_yaml(root / CONFIG_FILE)
+    if overlay is not None:
+        extra = read_yaml(Path(overlay).expanduser()) if not isinstance(overlay, dict) else overlay
+        raw = merge(raw, personal_overlay(extra))
+    cfg = Config(raw=raw, root=root)
     errors = validate(cfg)
     if errors:
         raise ConfigError("\n".join(errors))
@@ -348,6 +393,10 @@ def validate(cfg: Config) -> list[str]:
             errors.append(f"models.cross_check.{stage}: needs the {CHECKER_AGENT} agent")
     if not re.fullmatch(r"\.?[A-Za-z0-9][\w.-]*", cfg.runs_dir) or cfg.runs_dir in (".git", ".github", ".vscode"):
         errors.append("runs.dir must be one folder name at the repo root, such as .ai-harness")
+    for key in cfg.personal_overrides:
+        if key not in PERSONAL_RUNTIME_KEYS:
+            errors.append(f"personal_overrides: {key} cannot be changed at run time; "
+                          f"use one of {', '.join(PERSONAL_RUNTIME_KEYS)}")
     refresh = cfg.code_index.get("seed_refresh", "stale")
     if refresh not in ("stale", "every-pr", "manual"):
         errors.append("code.graph index.seed_refresh must be stale, every-pr or manual")

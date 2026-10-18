@@ -55,8 +55,15 @@ def _strip_jsonc(text: str) -> str:
     return re.sub(r",(\s*[}\]])", r"\1", "".join(out))
 
 
+def personal_settings_file(cfg: Config, copilot_dir: Path | None = None) -> Path:
+    """The developer's own settings file, shared with the hook: ~/.copilot/<plugin>.local.yaml."""
+    return (copilot_dir or Path.home() / ".copilot").expanduser() / f"{cfg.plugin_name}.local.yaml"
+
+
 def install_user(cfg: Config, copilot_dir: Path | None = None, vscode_user_dir: Path | None = None,
-                 uninstall: bool = False) -> list[str]:
+                 uninstall: bool = False, source: Path | None = None) -> list[str]:
+    """Install the built plugin at user level. `source` is a folder holding a build
+    (default: this repo's committed plugin/); a personal build passes its own."""
     copilot = (copilot_dir or Path.home() / ".copilot").expanduser()
     vscode = (vscode_user_dir or default_vscode_user_dir()).expanduser()
     home = copilot / cfg.plugin_name
@@ -95,7 +102,8 @@ def install_user(cfg: Config, copilot_dir: Path | None = None, vscode_user_dir: 
             manifest_path.unlink()
         return [f"removed {len(previous['files'])} files and {len(previous['servers'])} servers", *messages]
 
-    plugin = cfg.root / PLUGIN_DIR
+    base = Path(source) if source is not None else cfg.root
+    plugin = base / PLUGIN_DIR
     if not (plugin / "plugin.json").exists():
         raise FileNotFoundError("plugin/ is not built; run `harness build` first")
     scripts_abs = (home / "scripts").as_posix()
@@ -106,12 +114,12 @@ def install_user(cfg: Config, copilot_dir: Path | None = None, vscode_user_dir: 
         dest.write_bytes(data)
         written.append(str(dest))
 
-    for src in sorted((cfg.root / SCRIPTS_DIR).glob("*")):
+    for src in sorted((base / SCRIPTS_DIR).glob("*")):
         put(home / "scripts" / src.name, src.read_bytes())
-    for src in sorted((cfg.root / SKILLS_DIR).rglob("*")):
+    for src in sorted((base / SKILLS_DIR).rglob("*")):
         if src.is_file():
-            put(copilot / "skills" / src.relative_to(cfg.root / SKILLS_DIR), src.read_bytes())
-    for src in sorted((cfg.root / AGENTS_DIR).glob("*.agent.md")):
+            put(copilot / "skills" / src.relative_to(base / SKILLS_DIR), src.read_bytes())
+    for src in sorted((base / AGENTS_DIR).glob("*.agent.md")):
         text = src.read_text(encoding="utf-8")
         text = text.replace("${PLUGIN_ROOT}/scripts", scripts_abs).replace(f"]({SKILL_LINK_PREFIX}/", "](../skills/")
         put(copilot / "agents" / src.name, text.encode())
