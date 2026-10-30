@@ -59,22 +59,38 @@ You can edit any artifact before approving it. Approving records a hash of each 
 
 Check Node with `node --version`.
 
-### Step 1: turn on agent plugins and add the marketplace
+### Step 1: install the plugin
 
-Open your VS Code user settings as JSON (`Preferences: Open User Settings (JSON)`) and add:
+Pick one of these. The first works on every VS Code version that has agent plugins, so try it first.
 
-```json
-"chat.plugins.enabled": true,
-"chat.plugins.marketplaces": ["Yasod94/enterprise-ai-harness"]
-```
+A. From the Command Palette (recommended):
 
-The marketplace entry also accepts a Git URL (`https://...` or `git@...`). If the repository is private, your normal Git credentials must be able to clone it.
+1. Press `Cmd+Shift+P` (Windows and Linux: `Ctrl+Shift+P`) and run `Chat: Install Plugin from Source`.
+2. Enter `Yasod94/enterprise-ai-harness` and press Enter.
+3. When VS Code asks whether to trust the source, choose to trust it. VS Code clones the repository with Git, finds the plugin, installs it and adds the repository to your plugin marketplaces, so updates arrive on their own.
 
-### Step 2: install the plugin
+B. From the marketplace view:
 
-Open the Extensions view, search `@agentPlugins`, select enterprise-ai-harness and choose Install. You can also find it in the Chat view under the cog, Agent Customizations, Plugins.
+1. Open your user settings as JSON (`Preferences: Open User Settings (JSON)`; not the workspace settings, which VS Code ignores for this setting) and add the marketplace next to the default one:
 
-That installs the agents, skills, hook scripts and MCP server definitions. Nothing is copied into your repositories.
+   ```json
+   "chat.plugins.marketplaces": [
+     "github/awesome-copilot#marketplace",
+     "Yasod94/enterprise-ai-harness"
+   ]
+   ```
+
+2. In the Chat view, select the cog, open Agent Customizations (called Customizations in newer versions), then Plugins, and search for `enterprise-ai-harness`. In the Extensions view, searching `@agentPlugins` now shows "Find Agent Plugins in Customizations" with a "Browse Agent Plugins" button that opens the same page; older versions list the plugins there directly.
+3. Select Install. If the plugin does not appear, run `Chat: Refresh Plugin Marketplaces`.
+
+Either way, the agents, skills, hook scripts and MCP server definitions are installed for you only. Nothing is copied into your repositories.
+
+### Step 2: check it installed
+
+- The Extensions view shows enterprise-ai-harness under "Agent Plugins - Installed".
+- The agents dropdown in the Chat view lists Change Orchestrator, Intake, Griller and the other stage agents.
+
+If neither shows up, see [Plugin does not show up](#plugin-does-not-show-up).
 
 ### Step 3: check the hook settings
 
@@ -412,6 +428,24 @@ For later changes, follow [Changing a setting for the team](#changing-a-setting-
 | `harness status --repo <clone>` | list runs in a service repo clone |
 
 ## Troubleshooting
+
+### Plugin does not show up
+
+| Check | How |
+| --- | --- |
+| VS Code is current | `Code > Check for Updates` on macOS (`Help > Check for Updates` elsewhere). If the Command Palette has no `Chat: Install Plugin from Source`, your VS Code is too old for agent plugins. |
+| Copilot Chat is signed in and enabled | The Chat view opens and answers. The plugin commands are hidden while chat is disabled. |
+| Agent plugins are on | Search Settings for `chat.plugins.enabled`; it must be checked. "Managed by your organization" under it means a policy turned plugins off: ask your Copilot admin. |
+| The setting is in user settings | `chat.plugins.marketplaces` only counts in user settings JSON, not in a workspace's `.vscode/settings.json`. |
+| Your organization allows this marketplace | An install that fails with "Plugins from ... are blocked by your organization" comes from the `strictKnownMarketplaces` policy; the admin must add `Yasod94/enterprise-ai-harness`. With `allowManagedHooksOnly`, the admin must also force-enable the plugin, or its hooks do not run. |
+| Git works | Install from source clones with Git. Run `git --version` in a terminal; on macOS this offers to install the Command Line Tools if Git is missing. |
+| VS Code can reach GitHub | VS Code reads `https://raw.githubusercontent.com/Yasod94/enterprise-ai-harness/main/.github/plugin/marketplace.json`. Open it in a browser on the same network; a proxy that blocks it blocks the marketplace too. |
+
+If it still does not appear, run `Developer: Set Log Level...` and choose Debug, run `Chat: Refresh Plugin Marketplaces`, then open the Output panel, pick "Window" in its dropdown and look for lines starting with `[PluginMarketplaceService]`. They name each file VS Code tried and the HTTP status it got.
+
+When agent plugins are blocked for you, use [the fallback install](#when-agent-plugins-are-blocked).
+
+### Other problems
 
 | Symptom | Check |
 | --- | --- |
