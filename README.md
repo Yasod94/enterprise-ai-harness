@@ -287,9 +287,40 @@ Skills and agents:
 
 #### Runtime settings, no rebuild
 
-1. Create the file `~/.copilot/enterprise-ai-harness.local.yaml` (on Windows, `%USERPROFILE%\.copilot\enterprise-ai-harness.local.yaml`). Start from [templates/personal-settings.local.yaml](templates/personal-settings.local.yaml), which lists every runtime key commented out at its default, or run `uv run harness config --init` in a clone of this repo to write it for you.
-2. Uncomment the lines you want and change the values.
-3. Save. The next message or tool call uses them.
+You need only VS Code for this; no clone of this repo, no rebuild.
+
+1. Create the file and open it in VS Code. On macOS or Linux, run in a terminal:
+
+   ```bash
+   mkdir -p ~/.copilot && touch ~/.copilot/enterprise-ai-harness.local.yaml
+   open -a "Visual Studio Code" ~/.copilot/enterprise-ai-harness.local.yaml   # Linux: code ~/.copilot/enterprise-ai-harness.local.yaml
+   ```
+
+   On Windows, in PowerShell:
+
+   ```powershell
+   New-Item -ItemType File -Force "$HOME\.copilot\enterprise-ai-harness.local.yaml"; code "$HOME\.copilot\enterprise-ai-harness.local.yaml"
+   ```
+
+2. Write only the settings you want to change (the example below shows the shape). [templates/personal-settings.local.yaml](templates/personal-settings.local.yaml) lists every setting you can use, commented out at its default; you can paste it in and uncomment lines instead.
+3. Save. Your next message uses them. To undo a change, delete the line; to go back to the team's settings, delete the file.
+
+To check a budget change, look at the Cost line on the stage's review card (for example `Cost 18 of 120 tool calls`). Ask the Change Orchestrator `settings` for a reminder of where the file goes and what it takes.
+
+Settings you can change this way, with the team defaults:
+
+| Setting | Default | Values |
+| --- | --- | --- |
+| `review.implement` | `per-task` | `per-task`, `per-batch-<n>` (review every n tasks), `none` |
+| `budgets.<scope>.tool_calls`, `budgets.<scope>.output_kb` | see [Default settings](#default-settings) | a number; scopes are `orchestrator`, `check`, `intake`, `grill`, `impact`, `scout`, `plan`, `implement`, `implement-task`, `verify`, `cross-check` |
+| `hooks.out_of_plan_files` | `ask` | `ask`, `allow`, `deny` for edits to files not in `impact.json` |
+| `hooks.audit` | `false` | `true` logs tool names to `.ai-harness/.audit.log` |
+| `runs.commit` | `false` | `true` commits the run record with your PRs |
+| `code_index.seed_refresh` | `stale` | `stale`, `every-pr`, `manual` |
+| `code_index.seed_max_age_days` | `7` | a number of days |
+| `code_index.sync` | `npx -y @colbymchenry/codegraph@1.6.1 sync --quiet` | the command that updates the code graph |
+
+Models, servers and agents are not on this list: ask the team to change them for everyone, or see [A personal build for everything else](#a-personal-build-for-everything-else).
 
 For one clone only, put the same keys in `harness.local.yaml` at the clone's root. It wins over your home file, and the hook keeps it out of git.
 
