@@ -61,17 +61,8 @@ Check Node with `node --version`.
 
 ### Step 1: install the plugin
 
-Pick one of these. The first works on every VS Code version that has agent plugins, so try it first.
-
-A. From the Command Palette (recommended):
-
-1. Press `Cmd+Shift+P` (Windows and Linux: `Ctrl+Shift+P`) and run `Chat: Install Plugin from Source`.
-2. Enter `Yasod94/enterprise-ai-harness` and press Enter.
-3. When VS Code asks whether to trust the source, choose to trust it. VS Code clones the repository with Git, finds the plugin, installs it and adds the repository to your plugin marketplaces, so updates arrive on their own.
-
-B. From the marketplace view:
-
-1. Open your user settings as JSON (`Preferences: Open User Settings (JSON)`; not the workspace settings, which VS Code ignores for this setting) and add the marketplace next to the default one:
+1. Open the Command Palette (`Cmd+Shift+P` on macOS, `Ctrl+Shift+P` on Windows and Linux) and run `Preferences: Open User Settings (JSON)`. Use this file, not a project's `.vscode/settings.json`: VS Code ignores the setting there.
+2. Add these lines inside the outer `{ }` and save:
 
    ```json
    "chat.plugins.marketplaces": [
@@ -80,10 +71,12 @@ B. From the marketplace view:
    ]
    ```
 
-2. In the Chat view, select the cog, open Agent Customizations (called Customizations in newer versions), then Plugins, and search for `enterprise-ai-harness`. In the Extensions view, searching `@agentPlugins` now shows "Find Agent Plugins in Customizations" with a "Browse Agent Plugins" button that opens the same page; older versions list the plugins there directly.
-3. Select Install. If the plugin does not appear, run `Chat: Refresh Plugin Marketplaces`.
+   The first entry is VS Code's default marketplace; keep it so you still see the usual plugins. If the file already has a `chat.plugins.marketplaces` line, add `"Yasod94/enterprise-ai-harness"` to that list instead of adding a second one.
+3. Find enterprise-ai-harness and select Install. In the Chat view, select the cog, open Agent Customizations (called Customizations in newer versions), then Plugins, and search `enterprise-ai-harness`. The Extensions view gets you to the same place: searching `@agentPlugins` shows a "Browse Agent Plugins" button in newer versions, and the plugin itself in older ones. If it does not show up within a minute, run `Chat: Refresh Plugin Marketplaces` from the Command Palette.
 
-Either way, the agents, skills, hook scripts and MCP server definitions are installed for you only. Nothing is copied into your repositories.
+The agents, skills, hook scripts and MCP server definitions are installed for you only. Nothing is copied into your repositories.
+
+Another way, without editing settings: run `Chat: Install Plugin from Source` from the Command Palette, and type `Yasod94/enterprise-ai-harness` in the box that opens after you pick the command. Typing the repository name straight into the Command Palette only searches command names.
 
 ### Step 2: check it installed
 
