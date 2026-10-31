@@ -102,16 +102,30 @@ If your organization sets `allowManagedHooksOnly`, plugin hooks run only when an
 
 The orchestrator creates the run, switches to a `change/<run-id>` branch (it asks first if you have uncommitted changes) and tells you which button to press.
 
-### Step 5: sign in to the servers
+### Step 5: connect GitHub and Atlassian
 
-The first time a server is used, VS Code asks you to sign in through the browser. No tokens go in files.
+The plugin brings its MCP servers with it; you only sign in. Sign-in happens in the browser and VS Code keeps the tokens, so nothing goes in a file.
 
 | Server | Sign-in | Used for |
 | --- | --- | --- |
 | `github-ro`, `github-rw` | your GitHub account | reading repos and PRs; opening the PR |
-| `atlassian` | your Atlassian account (Rovo MCP v2; v1 sign-ins do not carry over) | Jira tickets and Confluence pages |
+| `atlassian` | your Atlassian Cloud account (Rovo MCP v2) | Jira tickets and Confluence pages |
 | `codegraph`, `ctx` | none, they run locally through `npx` | code graph and large command output |
 | `kb` | your KB server's sign-in | off by default; on once your team sets its URL |
+
+To connect now rather than in the middle of a run:
+
+1. Run `MCP: List Servers` from the Command Palette. The plugin's servers are listed under "enterprise-ai-harness (Agent Plugin)".
+2. Select `github-ro`, then Start Server. When VS Code says the server wants to sign in to GitHub, allow it and pick the GitHub account that can see your team's repos. Do the same for `github-rw`.
+3. Select `atlassian`, then Start Server. Allow the sign-in; the browser opens Atlassian's consent page. Log in with your work account, pick your company's Atlassian site, and accept. Back in VS Code the server shows as running.
+4. Check: `MCP: List Servers` shows each server as running, and in the Chat view the tools button lists `atlassian` and `github-ro` tools.
+
+If a server will not start or sign in:
+
+- Copilot Business or Enterprise: your organization's "MCP servers in Copilot" policy must be on. In Settings, `chat.mcp.access` shows "managed by your organization" when a policy controls it; `none` blocks every MCP server, and `registry` allows only servers in your organization's MCP registry, so the admin must add GitHub and Atlassian there.
+- GitHub organizations with SAML single sign-on: if GitHub tools answer that the resource is protected by SAML enforcement, sign out (`MCP: List Servers`, the server, Sign Out) and sign in again, authorizing your organization when GitHub asks.
+- Atlassian: the Rovo MCP server works with Atlassian Cloud sites only, and your Atlassian admin can turn it off or limit which apps may connect. If the consent page refuses, ask that admin. To switch site or account, use Disconnect Account on the `atlassian` server and start it again. Rovo MCP calls count against your organization's Rovo credits.
+- `MCP: List Servers`, the server, Show Output shows the server's own error.
 
 If you skip a sign-in, the stages that need that server use their fallback and say so on the review card.
 
