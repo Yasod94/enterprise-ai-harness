@@ -136,6 +136,16 @@ On the first run in each clone, the orchestrator runs the Harness Check. It repo
 - The repo has a committed seed and you have no local index: the hook restores the index from `.codegraph-seed/` on your first prompt. Nothing to do.
 - No seed yet: the Harness Check builds the index with `codegraph init` (a few minutes on a large repo). Then type `save code graph` and commit `.codegraph-seed/`, as a small PR of its own, so the rest of the team skips the build.
 
+After that the index looks after itself: while the agents edit code, the CodeGraph server's file watcher (or the hook's background sync) keeps it current, and when CodeGraph starts it re-reads files that changed since it last ran, including your own edits and pulls.
+
+To build the code graph yourself, for example when the Harness Check already ran before Node or CodeGraph worked, open a terminal in the repo's folder and run:
+
+```bash
+npx -y @colbymchenry/codegraph@1.6.1 init --yes
+```
+
+Then type `save code graph` to the Change Orchestrator and commit `.codegraph-seed/`. To run the whole Harness Check again, delete `.ai-harness/.checked` and start a run.
+
 The hook adds `.ai-harness/`, `.codegraph/` and `harness.local.yaml` to the clone's `.git/info/exclude`, so run files never show up in `git status`.
 
 ### Step 7 (optional): your own settings
